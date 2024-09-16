@@ -3,12 +3,20 @@
 # Exit immediately if a command exits with a non-zero status
 set -e
 
+if ! command -v conda &> /dev/null; then
+    echo "Conda is not initialized in the current shell. Running 'conda init'..."
+    conda init bash
+    # After running 'conda init', the script will need to be re-sourced.
+    exec bash
+fi
+
 # Step 1: Create the conda environment with Python 3.10
 echo "Creating conda environment 'avatars'..."
 conda create --name avatars -y python=3.10
 
 # Step 2: Activate the conda environment
 echo "Activating the environment..."
+source $(conda info --base)/etc/profile.d/conda.sh  # Ensure conda is recognized in scripts
 conda activate avatars
 
 # Step 3: Install the CUDA toolkit and Ninja
