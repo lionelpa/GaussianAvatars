@@ -1,4 +1,4 @@
-name: gaussian-avatars
+name: avatars
 channels:
   - pytorch
   - nvidia
@@ -138,5 +138,5 @@ dependencies:
       - werkzeug==3.0.4
       - yacs==0.1.8
 variables:
-  CUDA_HOME: /home/lionel.azevedo/anaconda3/envs/gaussian-avatars
-prefix: /home/lionel.azevedo/anaconda3/envs/gaussian-avatars
+  CUDA_HOME: /home/lionel.azevedo/anaconda3/envs/avatars
+prefix: /home/lionel.azevedo/anaconda3/envs/avatars
