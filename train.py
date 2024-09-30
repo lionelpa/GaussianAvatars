@@ -35,6 +35,9 @@ except ImportError:
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
+
+    # This condition is true if "python train.py --bind-to-mesh" is used. This indicates binding of gaussians
+    # to the mesh will be applied
     if dataset.bind_to_mesh:
         gaussians = FlameGaussianModel(dataset.sh_degree, dataset.disable_flame_static_offset, dataset.not_finetune_flame_params)
         mesh_renderer = NVDiffRenderer()

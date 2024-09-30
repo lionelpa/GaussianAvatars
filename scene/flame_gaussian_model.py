@@ -27,6 +27,7 @@ class FlameGaussianModel(GaussianModel):
         self.n_shape = n_shape
         self.n_expr = n_expr
 
+        # load FlameHead model (todo 18.9.24: may require deeper look)
         self.flame_model = FlameHead(
             n_shape, 
             n_expr,
@@ -36,6 +37,7 @@ class FlameGaussianModel(GaussianModel):
         self.flame_param_orig = None
 
         # binding is initialized once the mesh topology is known
+        # binding is a tensor that maps gaussian index to face index. Thus it initially has the length of 'self.flame_model.faces'
         if self.binding is None:
             self.binding = torch.arange(len(self.flame_model.faces)).cuda()
             self.binding_counter = torch.ones(len(self.flame_model.faces), dtype=torch.int32).cuda()

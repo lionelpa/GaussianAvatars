@@ -86,6 +86,8 @@ class Scene:
             print("Loading trained model at iteration {}".format(self.loaded_iter))
 
         # load dataset
+        # for Flame we check for "canonical_flame_param.npz" in the source path and load the scene info using the
+        # callback defined to load a dynamic NeRF data set
         assert os.path.exists(args.source_path), "Source path does not exist: {}".format(args.source_path)
         if os.path.exists(os.path.join(args.source_path, "sparse")):
             scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval)
