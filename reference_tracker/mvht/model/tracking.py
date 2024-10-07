@@ -46,6 +46,7 @@ def to_batch(x, indices):
 
 class FlameTracker:
     def __init__(self, cfg: BaseTrackingConfig):
+        print("FlameTracker called\n"*10)
         self.cfg = cfg
         
         self.device = cfg.device

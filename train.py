@@ -14,6 +14,8 @@ import torch
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 from random import randint
+
+from scene.ls7_gaussian_model import LS7GaussianModel
 from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer import render, network_gui
 from mesh_renderer import NVDiffRenderer
@@ -36,18 +38,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
 
-    # This condition is true if "python train.py --bind-to-mesh" is used. This indicates binding of gaussians
-    # to the mesh will be applied
-    if dataset.bind_to_mesh:
-        gaussians = FlameGaussianModel(dataset.sh_degree, dataset.disable_flame_static_offset, dataset.not_finetune_flame_params)
-        mesh_renderer = NVDiffRenderer()
-    else:
-        gaussians = GaussianModel(dataset.sh_degree)
+    gaussians = LS7GaussianModel(dataset.sh_degree)
+    mesh_renderer = NVDiffRenderer()
+
     scene = Scene(dataset, gaussians)
     gaussians.training_setup(opt)
-    if checkpoint:
-        (model_params, first_iter) = torch.load(checkpoint)
-        gaussians.restore(model_params, opt)
 
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
@@ -112,14 +107,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         if iteration % 1000 == 0:
             gaussians.oneupSHdegree()
 
+        # Me: Get next train cam from iter or loop if end is reached
         try:
             viewpoint_cam = next(iter_camera_train)
         except StopIteration:
             iter_camera_train = iter(loader_camera_train)
             viewpoint_cam = next(iter_camera_train)
-
-        if gaussians.binding != None:
-            gaussians.select_mesh_by_timestep(viewpoint_cam.timestep)
 
         # Render
         if (iteration - 1) == debug_from:
@@ -188,11 +181,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             if iteration == opt.iterations:
                 progress_bar.close()
 
-            # Log and save
+            # Log (and save)
             training_report(tb_writer, iteration, losses, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
-            if (iteration in saving_iterations):
-                print("[ITER {}] Saving Gaussians".format(iteration))
-                scene.save(iteration)
 
             # Densification
             if iteration < opt.densify_until_iter:

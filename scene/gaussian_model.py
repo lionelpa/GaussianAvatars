@@ -170,6 +170,16 @@ class GaussianModel:
             self.active_sh_degree += 1
 
     def create_from_pcd(self, pcd : Optional[BasicPointCloud], spatial_lr_scale : float):
+        r""" Me: Reads a given or initializes a random point cloud. Additionally, it assigns an nn.Parameter for each
+        learnable tensor regarding gaussian splatting. These are:
+        - self._xyz
+        - self._features_dc
+        - self._features_rest
+        - self._scaling
+        - self._rotation
+        - self._opacity
+        - self.max_radii2D
+        """
         self.spatial_lr_scale = spatial_lr_scale
         if pcd == None:
             assert self.binding is not None

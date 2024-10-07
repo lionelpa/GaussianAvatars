@@ -71,7 +71,16 @@ class Scene:
     gaussians : GaussianModel
 
     def __init__(self, args : ModelParams, gaussians : Union[GaussianModel, FlameGaussianModel], load_iteration=None, shuffle=True, resolution_scales=[1.0]):
-        """b
+        """
+        - load scene info based on dir structure
+            - train/test/val cameras
+            - initial point cloud
+            - nerf normalization
+            - FLAME: train meshes ???
+            - FLAME: test meshes ???
+            - FLAME: tgt_train_mesh_infos ???
+            - FLAME: tgt_test_mesh_infos ???
+
         :param path: Path to colmap scene main folder.
         """
         self.model_path = args.model_path
@@ -86,17 +95,10 @@ class Scene:
             print("Loading trained model at iteration {}".format(self.loaded_iter))
 
         # load dataset
-        # for Flame we check for "canonical_flame_param.npz" in the source path and load the scene info using the
-        # callback defined to load a dynamic NeRF data set
+        # for now we use colmap for photogrammetry, so we ignore camera params given by hylec
         assert os.path.exists(args.source_path), "Source path does not exist: {}".format(args.source_path)
         if os.path.exists(os.path.join(args.source_path, "sparse")):
             scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval)
-        elif os.path.exists(os.path.join(args.source_path, "canonical_flame_param.npz")):
-            print("Found FLAME parameter, assuming dynamic NeRF data set!")
-            scene_info = sceneLoadTypeCallbacks["DynamicNerf"](args.source_path, args.white_background, args.eval, target_path=args.target_path)
-        elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
-            print("Found transforms_train.json file, assuming Blender data set!")
-            scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.eval)
         else:
             assert False, "Could not recognize scene type!"
 
