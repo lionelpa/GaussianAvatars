@@ -97,8 +97,9 @@ class Scene:
         # load dataset
         # for now we use colmap for photogrammetry, so we ignore camera params given by hylec
         assert os.path.exists(args.source_path), "Source path does not exist: {}".format(args.source_path)
-        if os.path.exists(os.path.join(args.source_path, "sparse")):
-            scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval)
+        if os.path.exists(os.path.join(args.source_path, "cameras.xml")):
+            print(">>> INFO: Loading scene info using CAMERAS.XML!")
+            scene_info = sceneLoadTypeCallbacks["LS7XML"](args.source_path, args.images, args.eval)
         else:
             assert False, "Could not recognize scene type!"
 
@@ -140,9 +141,9 @@ class Scene:
             self.test_cameras[resolution_scale] = cameraList_from_camInfos(scene_info.test_cameras, resolution_scale, args)
         
         # process meshes
-        if gaussians.binding != None:
-            self.gaussians.load_meshes(scene_info.train_meshes, scene_info.test_meshes, 
-                                       scene_info.tgt_train_meshes, scene_info.tgt_test_meshes)
+        # if gaussians.binding != None:
+        #     self.gaussians.load_meshes(scene_info.train_meshes, scene_info.test_meshes,
+        #                                scene_info.tgt_train_meshes, scene_info.tgt_test_meshes)
         
         # create gaussians
         if self.loaded_iter:

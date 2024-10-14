@@ -16,6 +16,7 @@ from typing import NamedTuple, Optional
 from tqdm import tqdm
 from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec2rotmat, \
     read_extrinsics_binary, read_intrinsics_binary, read_points3D_binary, read_points3D_text
+from utils.camera_utils import extract_trans_rot_from_xml_string
 from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
 import numpy as np
 import json
@@ -23,6 +24,8 @@ from pathlib import Path
 from plyfile import PlyData, PlyElement
 from utils.sh_utils import SH2RGB
 from scene.gaussian_model import BasicPointCloud
+import xml.etree.ElementTree as ET
+
 
 class CameraInfo(NamedTuple):
     uid: int
@@ -66,6 +69,27 @@ def getNerfppNorm(cam_info):
         W2C = getWorld2View2(cam.R, cam.T)
         C2W = np.linalg.inv(W2C)
         cam_centers.append(C2W[:3, 3:4])
+
+    center, diagonal = get_center_and_diag(cam_centers)
+    radius = diagonal * 1.1
+
+    translate = -center
+
+    return {"translate": translate, "radius": radius}
+
+def getNerfppNormHylec(cam_info):
+    def get_center_and_diag(cam_centers):
+        cam_centers = np.vstack(cam_centers)
+        avg_cam_center = np.mean(cam_centers, axis=0, keepdims=True)
+        center = avg_cam_center
+        dist = np.linalg.norm(cam_centers - center, axis=0, keepdims=True)
+        diagonal = np.max(dist)
+        return center.flatten(), diagonal
+
+    cam_centers = []
+
+    for cam in cam_info:
+        cam_centers.append(cam.T)
 
     center, diagonal = get_center_and_diag(cam_centers)
     radius = diagonal * 1.1
@@ -139,7 +163,82 @@ def storePly(path, xyz, rgb):
     ply_data = PlyData([vertex_element])
     ply_data.write(path)
 
-def readColmapSceneInfo(path, images, eval, llffhold=8):
+
+def readLS7ColmapSceneInfo(path, images, eval, llffhold=8):
+    """
+    Only load camera infos and nerf normalization. Disregard point cloud since the initial point cloud depends on the topology of the mesh.
+    """
+    test_cam_infos, train_cam_infos = readColmapCameraInfos(eval, images, llffhold, path)
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+
+    scene_info = SceneInfo(point_cloud=None,
+                           train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization,
+                           ply_path=None)
+    return scene_info
+
+def readLS7XMLSceneInfo(path, images, eval):
+    camsXML_path = os.path.join(path, "cameras.xml")
+    tree = ET.parse(camsXML_path)
+    root = tree.getroot()
+
+    # read sensors
+    sensors_root = root.find(".//chunk[@label='Chunk 1']//sensors") # first chunk contains all sensors (intrinsical data)
+    sensors = dict()
+    for s in sensors_root.findall("sensor"):
+        sid = int(s.get("id"))
+
+        c = s.find(".//calibration")
+        height = int(c.find(".//resolution").get("height"))
+        width = int(c.find(".//resolution").get("width"))
+        focal_in_pix = float(c.find(".//f").text)
+
+        # calculate fovs from
+        fovX = focal2fov(focal_in_pix, width)
+        fovY = focal2fov(focal_in_pix, height)
+
+        sensor_info = CameraInfo(uid=sid, FovX=fovX, FovY=fovY, width=width, height=height,
+                                 R=None, T=None, image=None, image_path=None, image_name=None)
+        sensors.update({sid: sensor_info})
+
+    # read cameras
+    cameras_root = root.find(".//chunk[@label='Chunk 1']//cameras") # first chunk contains all cameras (extrinsical data)
+    cams = []
+    for c in cameras_root.findall("camera"):
+        id = int(c.get("id"))
+        sid = int(c.get("sensor_id"))
+        sensor = sensors[sid]
+
+        mat_string = c.find(".//transform").text
+        T, R = extract_trans_rot_from_xml_string(mat_string)
+
+        label = c.get("label") # contains image name + extension
+        image_path = os.path.join(path, images, label)
+        image_name = Path(label).stem
+        image = Image.open(image_path)
+
+        # print(f"Cam with id {id} uses sensor with id {sid}. The image name is {image_name}. Sensor is null = {sensor==None}")
+        # print(sensor)
+
+        cam = CameraInfo(uid=id, FovY=sensor.FovY, FovX=sensor.FovX, width=sensor.width, height=sensor.height,
+                                 R=R, T=T, image=image, image_path=image_path, image_name=image_name)
+        cams.append(cam)
+
+    train_cam_infos = cams
+    test_cam_infos = []
+
+    # todo 25.9.24: Double check if correct here
+    nerf_normalization = getNerfppNormHylec(train_cam_infos)
+
+    scene_info = SceneInfo(point_cloud=None,
+                           train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization,
+                           ply_path=None)
+    return scene_info
+
+def readColmapCameraInfos(eval, images, llffhold, path):
     try:
         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
@@ -150,20 +249,24 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.txt")
         cam_extrinsics = read_extrinsics_text(cameras_extrinsic_file)
         cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
-
     reading_dir = "images" if images == None else images
-    cam_infos_unsorted = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, images_folder=os.path.join(path, reading_dir))
-    cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
-
+    cam_infos_unsorted = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics,
+                                           images_folder=os.path.join(path, reading_dir))
+    cam_infos = sorted(cam_infos_unsorted.copy(), key=lambda x: x.image_name)
     if eval:
         train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
         test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
     else:
         train_cam_infos = cam_infos
         test_cam_infos = []
+    return test_cam_infos, train_cam_infos
+
+def readColmapSceneInfo(path, images, eval, llffhold=8):
+    test_cam_infos, train_cam_infos = readColmapCameraInfos(eval, images, llffhold, path)
 
     nerf_normalization = getNerfppNorm(train_cam_infos)
 
+    # read initial point cloud from colmap generated .ply files
     ply_path = os.path.join(path, "sparse/0/points3D.ply")
     bin_path = os.path.join(path, "sparse/0/points3D.bin")
     txt_path = os.path.join(path, "sparse/0/points3D.txt")
@@ -238,53 +341,18 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
             camera_id = frame["camera_index"] if 'camera_id' in frame else None
             
             cam_infos.append(CameraInfo(
-                uid=idx, R=R, T=T, FovY=fovy, FovX=fovx, bg=bg, image=image, 
-                image_path=image_path, image_name=image_name, 
-                width=width, height=height, 
+                uid=idx, R=R, T=T, FovY=fovy, FovX=fovx, bg=bg, image=image,
+                image_path=image_path, image_name=image_name,
+                width=width, height=height,
                 timestep=timestep, camera_id=camera_id))
     return cam_infos
 
-def readNerfSyntheticInfo(path, white_background, eval, extension=".png"):
-    print("Reading Training Transforms")
-    train_cam_infos = readCamerasFromTransforms(path, "transforms_train.json", white_background, extension)
-    print("Reading Test Transforms")
-    test_cam_infos = readCamerasFromTransforms(path, "transforms_test.json", white_background, extension)
-    
-    if not eval:
-        train_cam_infos.extend(test_cam_infos)
-        test_cam_infos = []
-
-    nerf_normalization = getNerfppNorm(train_cam_infos)
-
-    ply_path = os.path.join(path, "points3d.ply")
-    if not os.path.exists(ply_path):
-        # Since this data set has no colmap data, we start with random points
-        num_pts = 100_000
-        print(f"Generating random point cloud ({num_pts})...")
-        
-        # We create random points inside the bounds of the synthetic Blender scenes
-        xyz = np.random.random((num_pts, 3)) * 2.6 - 1.3
-        shs = np.random.random((num_pts, 3)) / 255.0
-        pcd = BasicPointCloud(points=xyz, colors=SH2RGB(shs), normals=np.zeros((num_pts, 3)))
-
-        storePly(ply_path, xyz, SH2RGB(shs) * 255)
-    try:
-        pcd = fetchPly(ply_path)
-    except:
-        pcd = None
-
-    scene_info = SceneInfo(point_cloud=pcd,
-                           train_cameras=train_cam_infos,
-                           test_cameras=test_cam_infos,
-                           nerf_normalization=nerf_normalization,
-                           ply_path=ply_path)
-    return scene_info
 
 def readMeshesFromTransforms(path, transformsfile):
     with open(os.path.join(path, transformsfile)) as json_file:
         contents = json.load(json_file)
         frames = contents["frames"]
-        
+
         mesh_infos = {}
         for idx, frame in tqdm(enumerate(frames), total=len(frames)):
             if not 'timestep_index' in frame or frame["timestep_index"] in mesh_infos:
@@ -300,7 +368,7 @@ def readDynamicNerfInfo(path, white_background, eval, extension=".png", target_p
         train_cam_infos = readCamerasFromTransforms(target_path, "transforms_train.json", white_background, extension)
     else:
         train_cam_infos = readCamerasFromTransforms(path, "transforms_train.json", white_background, extension)
-    
+
     print("Reading Training Meshes")
     train_mesh_infos = readMeshesFromTransforms(path, "transforms_train.json")
     if target_path != "":
@@ -308,19 +376,19 @@ def readDynamicNerfInfo(path, white_background, eval, extension=".png", target_p
         tgt_train_mesh_infos = readMeshesFromTransforms(target_path, "transforms_train.json")
     else:
         tgt_train_mesh_infos = {}
-    
+
     print("Reading Validation Transforms")
     if target_path != "":
         val_cam_infos = readCamerasFromTransforms(target_path, "transforms_val.json", white_background, extension)
     else:
         val_cam_infos = readCamerasFromTransforms(path, "transforms_val.json", white_background, extension)
-    
+
     print("Reading Test Transforms")
     if target_path != "":
         test_cam_infos = readCamerasFromTransforms(target_path, "transforms_test.json", white_background, extension)
     else:
         test_cam_infos = readCamerasFromTransforms(path, "transforms_test.json", white_background, extension)
-    
+
     print("Reading Test Meshes")
     test_mesh_infos = readMeshesFromTransforms(path, "transforms_test.json")
     if target_path != "":
@@ -328,7 +396,7 @@ def readDynamicNerfInfo(path, white_background, eval, extension=".png", target_p
         tgt_test_mesh_infos = readMeshesFromTransforms(target_path, "transforms_test.json")
     else:
         tgt_test_mesh_infos = {}
-    
+
     if target_path != "" or not eval:
         train_cam_infos.extend(val_cam_infos)
         val_cam_infos = []
@@ -352,7 +420,9 @@ def readDynamicNerfInfo(path, white_background, eval, extension=".png", target_p
     return scene_info
 
 sceneLoadTypeCallbacks = {
-    "Colmap": readColmapSceneInfo,
-    "DynamicNerf" : readDynamicNerfInfo,
-    "Blender" : readNerfSyntheticInfo,
+    "LS7Colmap": readLS7ColmapSceneInfo,
+    "LS7XML": readLS7XMLSceneInfo,
+    # "Colmap": readColmapSceneInfo,
+    # "DynamicNerf" : readDynamicNerfInfo,
+    # "Blender" : readNerfSyntheticInfo,
 }

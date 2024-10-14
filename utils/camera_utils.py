@@ -8,6 +8,7 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
+import string
 
 from tqdm import tqdm
 from scene.cameras import Camera
@@ -80,3 +81,18 @@ def camera_to_JSON(id, camera : Camera):
         'fx' : fov2focal(camera.FovX, camera.width)
     }
     return camera_entry
+
+def extract_trans_rot_from_xml_string(matrix_string: string):
+    # Convert the string into a list of floats
+    matrix_values = list(map(float, matrix_string.split()))
+
+    # Reshape the list into a 4x4 numpy array
+    matrix_4x4 = np.array(matrix_values).reshape(4, 4)
+
+    # Extract the 3x3 rotation matrix (top-left of the 4x4 matrix)
+    rotation_matrix = matrix_4x4[:3, :3]
+
+    # Extract the translation vector (first three values of the last column)
+    translation_vector = matrix_4x4[:3, 3]
+
+    return translation_vector, rotation_matrix

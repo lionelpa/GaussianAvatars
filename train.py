@@ -10,6 +10,9 @@
 #
 
 import os
+import time
+
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
@@ -28,6 +31,7 @@ from utils.image_utils import psnr, error_map
 from lpipsPyTorch import lpips
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
+from PIL import Image
 try:
     from torch.utils.tensorboard import SummaryWriter
     TENSORBOARD_FOUND = True
@@ -42,8 +46,16 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     mesh_renderer = NVDiffRenderer()
 
     scene = Scene(dataset, gaussians)
+    cameras = []
+    cameras.extend(scene.getTrainCameras().cameras)
+    cameras.extend(scene.getTestCameras().cameras)
+    cameras.extend(scene.getValCameras().cameras)
+
+    gaussians.save_ply_for_SIBR("./output/init_gaussians_hylec.ply", cameras, render_debug_origin=True)
+
     gaussians.training_setup(opt)
 
+    # D6 = scene.getTrainCameras()[8]
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 

@@ -114,6 +114,9 @@ def compute_face_normals(verts, faces):
     return face_normals
 
 def compute_face_orientation(verts, faces, return_scale=False):
+    """
+    Me: Probably computes the axes (a0,a1,a2) for the local coord system for the rigged gaussians
+    """
     i0 = faces[..., 0].long()
     i1 = faces[..., 1].long()
     i2 = faces[..., 2].long()
@@ -126,6 +129,15 @@ def compute_face_orientation(verts, faces, return_scale=False):
     a1 = safe_normalize(torch.cross(a0, v2 - v0, dim=-1))
     a2 = -safe_normalize(torch.cross(a1, a0, dim=-1))  # will have artifacts without negation
 
+    """ Was passiert hier drunter?
+    Werden hier die Achsen (a0, a1, a2) so in einem (n_faces, 3, 3)-tensor abgelegt, dass jeweils x,y und z Koordinate
+    gemeinsam in einer dim sind? Also als Beispiel mit zufälligen Vektoren:
+    a0 = [(1,2,3)]
+    a1 = [(4,5,6)]
+    a2 = [(7,8,9)]
+    würde das Resultat sein:
+    [[1,4,7],[2,5,8],[3,6,9]] ???
+    """
     orientation = torch.cat([a0[..., None], a1[..., None], a2[..., None]], dim=-1)
 
     if return_scale:

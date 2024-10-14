@@ -12,7 +12,7 @@
 from typing import Optional
 import torch
 import numpy as np
-from utils.general_utils import inverse_sigmoid, get_expon_lr_func, build_rotation
+from utils.general_utils import inverse_sigmoid, get_expon_lr_func, build_rotation, rotation_matrix_from_vectors
 from torch import nn
 import os
 from utils.system_utils import mkdir_p
@@ -132,6 +132,7 @@ class GaussianModel:
                 self.select_mesh_by_timestep(0)
 
             # always need to normalize the rotation quaternions before chaining them
+            self.face_orien_quat = self.face_orien_quat.cuda()
             rot = self.rotation_activation(self._rotation)
             face_orien_quat = self.rotation_activation(self.face_orien_quat[self.binding])
             return quat_xyzw_to_wxyz(quat_product(quat_wxyz_to_xyzw(face_orien_quat), quat_wxyz_to_xyzw(rot)))  # roma
@@ -145,7 +146,11 @@ class GaussianModel:
             # Toyota Motor Europe NV/SA and its affiliated companies retain all intellectual property and proprietary rights in and to the following code lines and related documentation. Any commercial use, reproduction, disclosure or distribution of these code lines and related documentation without an express license agreement from Toyota Motor Europe NV/SA is strictly prohibited.
             if self.face_center is None:
                 self.select_mesh_by_timestep(0)
-            
+
+            # print("XYZ    ", self._xyz.device, self._xyz.shape)
+            # print("binding", self.binding.device, self.binding.shape)
+            # print("orient ", self.face_orien_mat.device, self.face_orien_mat.shape)
+
             xyz = torch.bmm(self.face_orien_mat[self.binding], self._xyz[..., None]).squeeze(-1)
             return xyz * self.face_scaling[self.binding] + self.face_center[self.binding]
 
@@ -181,12 +186,14 @@ class GaussianModel:
         - self.max_radii2D
         """
         self.spatial_lr_scale = spatial_lr_scale
+        # is true when we use rigged gaussians (no pcd has been loaded (from e.g. colmap) because it depends on mesh topology)
         if pcd == None:
             assert self.binding is not None
             num_pts = self.binding.shape[0]
             fused_point_cloud = torch.zeros((num_pts, 3)).float().cuda()
             fused_color = torch.tensor(np.random.random((num_pts, 3)) / 255.0).float().cuda()
         else:
+            raise Exception("Should not happen when using rigged gaussians")
             fused_point_cloud = torch.tensor(np.asarray(pcd.points)).float().cuda()
             fused_color = RGB2SH(torch.tensor(np.asarray(pcd.colors)).float().cuda())
         features = torch.zeros((fused_color.shape[0], 3, (self.max_sh_degree + 1) ** 2)).float().cuda()
@@ -196,8 +203,11 @@ class GaussianModel:
         self._features_dc = nn.Parameter(features[:,:,0:1].transpose(1, 2).contiguous().requires_grad_(True))
         self._features_rest = nn.Parameter(features[:,:,1:].transpose(1, 2).contiguous().requires_grad_(True))
         print("Number of points at initialisation: ", self.get_xyz.shape[0])
+        print("Number of triangles in the mesh   : ", self.binding.shape[0])
 
+        # should be false for rigged gaussians
         if self.binding is None:
+            raise Exception("Should not happen when using rigged gaussians")
             dist2 = torch.clamp_min(distCUDA2(self.get_xyz), 0.0000001)
             scales = torch.log(torch.sqrt(dist2))[...,None].repeat(1, 3)
         else:
@@ -279,6 +289,100 @@ class GaussianModel:
         if self.binding is not None:
             binding = self.binding.detach().cpu().numpy()
             attributes = np.concatenate((attributes, binding[:, None]), axis=1)
+
+        elements[:] = list(map(tuple, attributes))
+        el = PlyElement.describe(elements, 'vertex')
+        PlyData([el]).write(path)
+
+    def save_ply_for_SIBR(self, path, cameras=None, render_debug_origin=False):
+        mkdir_p(os.path.dirname(path))
+
+        # Read point cloud
+        ## global XYZ
+        xyz = self.get_xyz.detach().cpu().numpy()
+        normals = np.zeros_like(xyz)
+        ## color between 0 and 1 need to be mult by 255
+        color = self._features_dc.detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()*255
+
+        # For debug append camera data for visualization
+        ## append cam data
+        cam_color = {
+            "A": [1,0,0],
+            "B": [1,1,1],
+            "C": [1,1,1],
+            "D": [0,0,1],
+            "E": [0,0,1],
+            "F": [1,1,1],
+            "G": [1,1,1],
+            "H": [1,0,0],
+            "T": [1,1,1]
+        }
+
+        # For debug append camera data for visualization
+        ## center cage
+        ground_cams = [c for c in cameras if c.image_name[-1] == "1" and c.image_name[0] != "T"]
+        gc_xyz = np.array([c.T for c in ground_cams])
+        cage_floor_center = np.mean(gc_xyz, axis=0)
+
+        ## rotate cage according to cam column
+        A1 = [c for c in cameras if c.image_name == "A1"][0]
+        A6 = [c for c in cameras if c.image_name == "A6"][0]
+        RR = rotation_matrix_from_vectors(A6.T - A1.T, np.array([0, 1, 0]))
+
+        ## append cam data
+        if cameras is not None:
+            for cam in cameras:
+                xyz = np.vstack([xyz, RR @ (cam.T - cage_floor_center)])
+                color = np.vstack([color, cam_color[cam.image_name[0]]])
+                normals = np.vstack([normals, [0, 0, 0]])
+
+                step_size = 0.1
+                for i in range(1, 5):
+                    step = np.array([0, 0, step_size * i])
+                    step = RR @ cam.R @ step
+                    new_xyz = RR @ (cam.T + step - cage_floor_center)
+
+                    xyz = np.vstack([xyz, new_xyz])
+                    color = np.vstack([color, [0.2 * x for x in cam_color[cam.image_name[0]]]])
+                    normals = np.vstack([normals, [0, 0, 0]])
+
+        if render_debug_origin:
+            cyan = [0,1,1]
+            yellow = [1,1,0]
+            magenta = [1,0,1]
+
+            step_size = 0.05
+            for i in range(0, 20):
+                # right (x)
+                step = np.array([step_size * i, 0, 0])
+                xyz = np.vstack([xyz, step])
+                color = np.vstack([color, magenta])
+                normals = np.vstack([normals, [0, 0, 0]])
+
+                # up (y)
+                step = np.array([0, step_size * i, 0])
+                xyz = np.vstack([xyz, step])
+                color = np.vstack([color, cyan])
+                normals = np.vstack([normals, [0, 0, 0]])
+
+                # forward (z)
+                step = np.array([0,0, step_size * i])
+                xyz = np.vstack([xyz, step])
+                color = np.vstack([color, yellow])
+                normals = np.vstack([normals, [0, 0, 0]])
+
+        print(xyz.shape)
+        print(normals.shape)
+        print(color.shape, color.dtype, color[0,:])
+
+        dtype_full = [
+            ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),  # XYZ coordinates
+            ('nx', 'f4'), ('ny', 'f4'), ('nz', 'f4'),  # Normals (set to zero)
+            ('red', 'f4'), ('green', 'f4'), ('blue', 'f4')  # Color channels
+        ]
+
+        elements = np.empty(xyz.shape[0], dtype=dtype_full)
+        attributes = np.concatenate((xyz, normals, color), axis=1)
 
         elements[:] = list(map(tuple, attributes))
         el = PlyElement.describe(elements, 'vertex')

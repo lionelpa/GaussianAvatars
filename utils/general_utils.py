@@ -131,3 +131,24 @@ def safe_state(silent):
     np.random.seed(0)
     torch.manual_seed(0)
     torch.cuda.set_device(torch.device("cuda:0"))
+
+
+def rotation_matrix_from_vectors(vec1, vec2):
+    """ Find the rotation matrix that aligns vec1 to vec2 """
+    a = vec1 / np.linalg.norm(vec1)
+    b = vec2 / np.linalg.norm(vec2)
+
+    # Compute the cross product and dot product
+    v = np.cross(a, b)  # Axis of rotation
+    c = np.dot(a, b)  # Cosine of the angle
+    s = np.linalg.norm(v)  # Sine of the angle
+
+    # Build the skew-symmetric cross-product matrix of v
+    vx = np.array([[0, -v[2], v[1]],
+                   [v[2], 0, -v[0]],
+                   [-v[1], v[0], 0]])
+
+    # Compute the rotation matrix
+    R = np.eye(3) + vx + vx @ vx * ((1 - c) / (s ** 2))
+
+    return R
