@@ -2,7 +2,8 @@ from torch import nn
 
 from utils.pytorch3d_load_obj import load_obj
 
-LS7_MESH_PATH_LIONEL = "/home/lio/PycharmProjects/GaussianAvatars/ls7_model/assets/result_noGlands.obj"
+LS7_MESH_PATH_LIONEL = "/home/lio/PycharmProjects/GaussianAvatars/ls7_model/assets/final_fit_invtrans_bodyscan.obj"
+# LS7_MESH_PATH_LIONEL = "/home/lio/PycharmProjects/GaussianAvatars/ls7_model/assets/result_noGlands.obj"
 # LS7_MESH_PATH_LIONEL = "ls7_model/assets/result_noGlands.obj"
 
 

@@ -9,20 +9,23 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
-from typing import Optional
-import torch
-import numpy as np
-from utils.general_utils import inverse_sigmoid, get_expon_lr_func, build_rotation, rotation_matrix_from_vectors
-from torch import nn
 import os
-from utils.system_utils import mkdir_p
+from typing import Optional
+
+import numpy as np
+import torch
 from plyfile import PlyData, PlyElement
 # from pytorch3d.transforms import quaternion_multiply
 from roma import quat_product, quat_xyzw_to_wxyz, quat_wxyz_to_xyzw
-from utils.sh_utils import RGB2SH
 from simple_knn._C import distCUDA2
-from utils.graphics_utils import BasicPointCloud
+from torch import nn
+
+from utils.general_utils import inverse_sigmoid, get_expon_lr_func, build_rotation
 from utils.general_utils import strip_symmetric, build_scaling_rotation
+from utils.graphics_utils import BasicPointCloud
+from utils.sh_utils import RGB2SH
+from utils.system_utils import mkdir_p
+
 
 class GaussianModel:
 
@@ -318,29 +321,29 @@ class GaussianModel:
             "T": [1,1,1]
         }
 
-        # For debug append camera data for visualization
-        ## center cage
-        ground_cams = [c for c in cameras if c.image_name[-1] == "1" and c.image_name[0] != "T"]
-        gc_xyz = np.array([c.T for c in ground_cams])
-        cage_floor_center = np.mean(gc_xyz, axis=0)
+        # # For debug append camera data for visualization
+        # ## center cage
+        # ground_cams = [c for c in cameras if c.image_name[-1] == "1" and c.image_name[0] != "T"]
+        # gc_xyz = np.array([c.T for c in ground_cams])
+        # cage_floor_center = np.mean(gc_xyz, axis=0)
 
-        ## rotate cage according to cam column
-        A1 = [c for c in cameras if c.image_name == "A1"][0]
-        A6 = [c for c in cameras if c.image_name == "A6"][0]
-        RR = rotation_matrix_from_vectors(A6.T - A1.T, np.array([0, 1, 0]))
+        # ## rotate cage according to cam column
+        # A1 = [c for c in cameras if c.image_name == "A1"][0]
+        # A6 = [c for c in cameras if c.image_name == "A6"][0]
+        # RR = rotation_matrix_from_vectors(A6.T - A1.T, np.array([0, 1, 0]))
 
         ## append cam data
         if cameras is not None:
             for cam in cameras:
-                xyz = np.vstack([xyz, RR @ (cam.T - cage_floor_center)])
+                xyz = np.vstack([xyz, (cam.T)])
                 color = np.vstack([color, cam_color[cam.image_name[0]]])
                 normals = np.vstack([normals, [0, 0, 0]])
 
                 step_size = 0.1
                 for i in range(1, 5):
                     step = np.array([0, 0, step_size * i])
-                    step = RR @ cam.R @ step
-                    new_xyz = RR @ (cam.T + step - cage_floor_center)
+                    step = cam.R @ step
+                    new_xyz = (cam.T + step)
 
                     xyz = np.vstack([xyz, new_xyz])
                     color = np.vstack([color, [0.2 * x for x in cam_color[cam.image_name[0]]]])
