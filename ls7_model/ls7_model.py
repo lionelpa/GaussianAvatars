@@ -1,9 +1,12 @@
+from pathlib import Path
+
 from torch import nn
 
 from utils.pytorch3d_load_obj import load_obj
 
-LS7_MESH_PATH_LIONEL = "/home/lio/PycharmProjects/GaussianAvatars/ls7_model/assets/final_fit_invtrans_bodyscan.obj"
-# LS7_MESH_PATH_LIONEL = "/home/lio/PycharmProjects/GaussianAvatars/ls7_model/assets/result_noGlands.obj"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+LS7_MESH_PATH_LIONEL = PROJECT_ROOT / "ls7_model/assets/final_fit_invtrans_bodyscan.obj"
+# LS7_MESH_PATH_LIONEL = PROJECT_ROOT / "ls7_model/assets/result_noGlands.obj"
 # LS7_MESH_PATH_LIONEL = "ls7_model/assets/result_noGlands.obj"
 
 

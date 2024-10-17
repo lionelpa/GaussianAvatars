@@ -374,9 +374,9 @@ class GaussianModel:
                 color = np.vstack([color, yellow])
                 normals = np.vstack([normals, [0, 0, 0]])
 
-        print(xyz.shape)
-        print(normals.shape)
-        print(color.shape, color.dtype, color[0,:])
+        # print(xyz.shape)
+        # print(normals.shape)
+        # print(color.shape, color.dtype, color[0,:])
 
         dtype_full = [
             ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),  # XYZ coordinates
