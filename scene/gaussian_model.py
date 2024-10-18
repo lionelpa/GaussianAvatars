@@ -135,7 +135,6 @@ class GaussianModel:
                 self.select_mesh_by_timestep(0)
 
             # always need to normalize the rotation quaternions before chaining them
-            self.face_orien_quat = self.face_orien_quat.cuda()
             rot = self.rotation_activation(self._rotation)
             face_orien_quat = self.rotation_activation(self.face_orien_quat[self.binding])
             return quat_xyzw_to_wxyz(quat_product(quat_wxyz_to_xyzw(face_orien_quat), quat_wxyz_to_xyzw(rot)))  # roma
@@ -335,7 +334,7 @@ class GaussianModel:
         ## append cam data
         if cameras is not None:
             for cam in cameras:
-                xyz = np.vstack([xyz, (cam.T)])
+                xyz = np.vstack([xyz, cam.camera_center])
                 color = np.vstack([color, cam_color[cam.image_name[0]]])
                 normals = np.vstack([normals, [0, 0, 0]])
 
@@ -343,7 +342,7 @@ class GaussianModel:
                 for i in range(1, 5):
                     step = np.array([0, 0, step_size * i])
                     step = cam.R @ step
-                    new_xyz = (cam.T + step)
+                    new_xyz = cam.camera_center + step
 
                     xyz = np.vstack([xyz, new_xyz])
                     color = np.vstack([color, [0.2 * x for x in cam_color[cam.image_name[0]]]])

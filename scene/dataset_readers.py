@@ -16,7 +16,7 @@ from typing import NamedTuple, Optional
 from tqdm import tqdm
 from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec2rotmat, \
     read_extrinsics_binary, read_intrinsics_binary, read_points3D_binary, read_points3D_text
-from utils.camera_utils import extract_trans_rot_from_xml_string
+from utils.camera_utils import extract_c2w_mat_from_xml_string
 from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
 import numpy as np
 import json
@@ -178,7 +178,7 @@ def readLS7ColmapSceneInfo(path, images, eval, llffhold=8):
                            ply_path=None)
     return scene_info
 
-def readLS7XMLSceneInfo(path, images, eval):
+def readLS7XMLSceneInfo(path, images, white_background=True):
     camsXML_path = os.path.join(path, "cameras.xml")
     tree = ET.parse(camsXML_path)
     root = tree.getroot()
@@ -211,7 +211,15 @@ def readLS7XMLSceneInfo(path, images, eval):
         sensor = sensors[sid]
 
         mat_string = c.find(".//transform").text
-        T, R = extract_trans_rot_from_xml_string(mat_string)
+        c2w = extract_c2w_mat_from_xml_string(mat_string)
+        
+        # for Camera obj we need R and T of the w2c matrix
+        w2c = np.linalg.inv(c2w)
+        R = np.transpose(w2c[:3,:3])  # R is stored transposed due to 'glm' in CUDA code
+        T = w2c[:3, 3]
+
+        bg = np.array([1,1,1]) if white_background else np.array([0, 0, 0])
+
 
         label = c.get("label") # contains image name + extension
         image_path = os.path.join(path, images, label)

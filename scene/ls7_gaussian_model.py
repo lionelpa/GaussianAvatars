@@ -24,7 +24,7 @@ class LS7GaussianModel(GaussianModel):
         super().__init__(sh_degree)
 
         # load LS7 model and move it to GPU using cuda()
-        self.ls7_model = LS7Model()
+        self.ls7_model = LS7Model().cuda()
         self.verts = self.ls7_model.verts
         self.faces = self.ls7_model.faces
 
@@ -36,6 +36,8 @@ class LS7GaussianModel(GaussianModel):
         self.face_orien_mat, self.face_scaling = compute_face_orientation(self.verts.squeeze(0), self.faces.squeeze(0), return_scale=True)
         # self.face_orien_quat = matrix_to_quaternion(self.face_orien_mat)  # pytorch3d (WXYZ)
         self.face_orien_quat = quat_xyzw_to_wxyz(rotmat_to_unitquat(self.face_orien_mat))  # roma
+        
+        self.face_orien_quat = self.face_orien_quat.cuda()
         self.face_orien_mat = self.face_orien_mat.cuda()
         self.face_scaling = self.face_scaling.cuda()
 

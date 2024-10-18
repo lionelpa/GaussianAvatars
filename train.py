@@ -10,13 +10,9 @@
 #
 
 import os
-import time
-
-import numpy as np
 import torch
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
-from random import randint
 
 from scene.ls7_gaussian_model import LS7GaussianModel
 from utils.loss_utils import l1_loss, ssim
@@ -31,7 +27,6 @@ from utils.image_utils import psnr, error_map
 from lpipsPyTorch import lpips
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
-from PIL import Image
 try:
     from torch.utils.tensorboard import SummaryWriter
     TENSORBOARD_FOUND = True
@@ -131,7 +126,18 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             pipe.debug = True
         render_pkg = render(viewpoint_cam, gaussians, pipe, background)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+        
+        # sanity check
+        black_pixels_mask = torch.all(image == 0, dim=0)
+        black_pixel_count = (black_pixels_mask).sum()
+        white_pixels_mask = torch.all(image == 1, dim=0)
+        white_pixel_count = (white_pixels_mask).sum()
+        if(white_pixel_count == image.shape[1] * image.shape[2]):
+            raise Exception("All pixels are white!!!")
+        elif(black_pixel_count == image.shape[1] * image.shape[2]):
+            raise Exception("All pixels are black!!!")
 
+        
         # Loss
         gt_image = viewpoint_cam.original_image.cuda()
 
@@ -169,6 +175,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 losses['lap'] = gaussians.compute_laplacian_loss() * opt.lambda_laplacian
         
         losses['total'] = sum([v for k, v in losses.items()])
+        
+        # print(f"Loss 'xyz'               : {losses.get('xyz', -1)}")
+        # print(f"Loss 'scale'             : {losses.get('scale', -1)}")
+        # print(f"Loss 'dy_off'            : {losses.get('dy_off', -1)}")
+        # print(f"Loss 'dynamic_offset_std': {losses.get('dynamic_offset_std', -1)}")
+        # print(f"Loss 'lap'               : {losses.get('lap', -1)}")
+        # print(f"Loss 'total'             : {losses['total']}")
+        
         losses['total'].backward()
 
         iter_end.record()
