@@ -296,7 +296,12 @@ class GaussianModel:
         el = PlyElement.describe(elements, 'vertex')
         PlyData([el]).write(path)
 
-    def save_ply_for_SIBR(self, path, cameras=None, render_debug_origin=False):
+    def save_ply_for_SIBR(self, path, scene=None, render_debug_origin=False):
+        cameras = []
+        cameras.extend(scene.getTrainCameras().cameras)
+        cameras.extend(scene.getTestCameras().cameras)
+        cameras.extend(scene.getValCameras().cameras)
+        
         mkdir_p(os.path.dirname(path))
 
         # Read point cloud

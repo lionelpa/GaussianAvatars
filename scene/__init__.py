@@ -38,33 +38,31 @@ class CameraDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         if isinstance(idx, int):
             # ---- from readCamerasFromTransforms() ----
-            camera = deepcopy(self.cameras[idx])
-
-            if camera.image is None:
-                image = Image.open(camera.image_path)
-            else:
-                image = camera.image
-
-            im_data = np.array(image.convert("RGBA"))
-            norm_data = im_data / 255.0
-            arr = norm_data[:,:,:3] * norm_data[:, :, 3:4] + camera.bg * (1 - norm_data[:, :, 3:4])
-            image = Image.fromarray(np.array(arr*255.0, dtype=np.byte), "RGB")
-
-            # ---- from loadCam() and Camera.__init__() ----
-            resized_image_rgb = PILtoTorch(image, (camera.image_width, camera.image_height))
-
-            image = resized_image_rgb[:3, ...]
-
-            if resized_image_rgb.shape[1] == 4:
-                gt_alpha_mask = resized_image_rgb[3:4, ...]
-                image *= gt_alpha_mask
-            
-            camera.original_image = image.clamp(0.0, 1.0)
-            return camera
+            camera = self.cameras[idx]
+            return self.load_camera_with_image_data(camera)
         elif isinstance(idx, slice):
             return CameraDataset(self.cameras[idx])
         else:
             raise TypeError("Invalid argument type")
+
+    def load_camera_with_image_data(self, camera):
+        camera = deepcopy(camera)
+        if camera.image is None:
+            image = Image.open(camera.image_path)
+        else:
+            image = camera.image
+        im_data = np.array(image.convert("RGBA"))
+        norm_data = im_data / 255.0
+        arr = norm_data[:, :, :3] * norm_data[:, :, 3:4] + camera.bg * (1 - norm_data[:, :, 3:4])
+        image = Image.fromarray(np.array(arr * 255.0, dtype=np.byte), "RGB")
+        # ---- from loadCam() and Camera.__init__() ----
+        resized_image_rgb = PILtoTorch(image, (camera.image_width, camera.image_height))
+        image = resized_image_rgb[:3, ...]
+        if resized_image_rgb.shape[1] == 4:
+            gt_alpha_mask = resized_image_rgb[3:4, ...]
+            image *= gt_alpha_mask
+        camera.original_image = image.clamp(0.0, 1.0)
+        return camera
 
 class Scene:
 
@@ -169,3 +167,31 @@ class Scene:
 
     def getTestCameras(self, scale=1.0):
         return CameraDataset(self.test_cameras[scale])
+    
+
+    def getShuffledTrainCamsWithFirstCamSpecified(self, first_cam_name, scale=1.0):
+        # Separate the target camera and other cameras
+        first_camera = None
+        other_cameras = []
+
+        for cam in self.train_cameras[scale]:
+            if cam.image_name == first_cam_name:
+                first_camera = cam
+            else:
+                other_cameras.append(cam)
+
+        if first_camera is None:
+            raise ValueError(f"Camera with image name '{first_cam_name}' not found in the list.")
+
+        # Shuffle the remaining cameras
+        random.shuffle(other_cameras)
+
+        # after shuffling append the list to itself to create a bigger dataset
+        cams = [first_camera] + other_cameras
+        cam_duplicates = []
+        for i in range(10):
+            cam_duplicates.extend(cams)
+        print("Cam Dataset Length:", len(cam_duplicates))
+
+        # Place the target camera at position 0 and append the others
+        return CameraDataset(cam_duplicates) 

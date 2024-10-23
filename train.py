@@ -10,17 +10,20 @@
 #
 
 import os
+from datetime import datetime
 import torch
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 
 from scene.ls7_gaussian_model import LS7GaussianModel
 from utils.loss_utils import l1_loss, ssim
+from utils.image_utils import save_tensor_as_image
 from gaussian_renderer import render, network_gui
 from mesh_renderer import NVDiffRenderer
 import sys
 from scene import Scene, GaussianModel, FlameGaussianModel
 from utils.general_utils import safe_state
+from scene import CameraDataset
 import uuid
 from tqdm import tqdm
 from utils.image_utils import psnr, error_map
@@ -36,29 +39,36 @@ except ImportError:
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
+    render_export_cam_name = "D4"
+    export_render_every_n_iters = 100
+    export_until_iter = 1500
+    export_fixed_iters = [1, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 40000, 100000, 300000, 590000, 600000]
+    training_start_time = datetime.now()
 
     gaussians = LS7GaussianModel(dataset.sh_degree)
     mesh_renderer = NVDiffRenderer()
 
     scene = Scene(dataset, gaussians)
-    cameras = []
-    cameras.extend(scene.getTrainCameras().cameras)
-    cameras.extend(scene.getTestCameras().cameras)
-    cameras.extend(scene.getValCameras().cameras)
-
-    gaussians.save_ply_for_SIBR("./output/init_gaussians_hylec.ply", cameras, render_debug_origin=True)
+    #gaussians.save_ply_for_SIBR("./output/init_gaussians_hylec.ply", scene, render_debug_origin=True)
 
     gaussians.training_setup(opt)
 
-    # D6 = scene.getTrainCameras()[8]
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
     iter_start = torch.cuda.Event(enable_timing = True)
     iter_end = torch.cuda.Event(enable_timing = True)
 
-    loader_camera_train = DataLoader(scene.getTrainCameras(), batch_size=None, shuffle=True, num_workers=8, pin_memory=True, persistent_workers=True)
+    #loader_camera_train = DataLoader(scene.getTrainCameras(), batch_size=None, shuffle=False, num_workers=12, pin_memory=True, persistent_workers=True)
+    render_export_cam = [c for c in scene.getTrainCameras().cameras if c.image_name == render_export_cam_name][0]
+    render_export_cam = CameraDataset.load_camera_with_image_data(None, render_export_cam)
+    
+    # dsCams = scene.getShuffledTrainCamsWithFirstCamSpecified(render_export_cam_name)
+    dsCams = scene.getTrainCameras()
+    loader_camera_train = DataLoader(dsCams, batch_size=None, shuffle=False, num_workers=32, pin_memory=False, persistent_workers=True)
     iter_camera_train = iter(loader_camera_train)
+    
+
     # viewpoint_stack = None
     ema_loss_for_log = 0.0
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
@@ -115,18 +125,30 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             gaussians.oneupSHdegree()
 
         # Me: Get next train cam from iter or loop if end is reached
-        try:
-            viewpoint_cam = next(iter_camera_train)
-        except StopIteration:
-            iter_camera_train = iter(loader_camera_train)
-            viewpoint_cam = next(iter_camera_train)
+        print("Choosing cam...")
+        is_render_export_iter = (iteration in export_fixed_iters) or ((iteration % export_render_every_n_iters) == 0 and iteration <= export_until_iter)
+        if (is_render_export_iter):
+            viewpoint_cam = render_export_cam
+        else:
+            try:
+                viewpoint_cam = next(iter_camera_train)
+            except StopIteration:
+                print(f"Reloading Camera Iterator... ({iteration})")
+                iter_camera_train = iter(loader_camera_train)
+                viewpoint_cam = next(iter_camera_train)
+        print(viewpoint_cam.image_name)
+
 
         # Render
         if (iteration - 1) == debug_from:
             pipe.debug = True
         render_pkg = render(viewpoint_cam, gaussians, pipe, background)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
-        
+        if (is_render_export_iter):
+            print("Exporting render...")
+            save_tensor_as_image(image, render_export_cam.image_name, iteration, training_start_time)
+            print("Finished exporting!")
+
         # sanity check
         black_pixels_mask = torch.all(image == 0, dim=0)
         black_pixel_count = (black_pixels_mask).sum()
