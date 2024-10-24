@@ -58,16 +58,20 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
     iter_start = torch.cuda.Event(enable_timing = True)
     iter_end = torch.cuda.Event(enable_timing = True)
+    
+    train_cam_dataset = scene.getTrainCameras()
+    progress_bar = tqdm(range(1, len(train_cam_dataset)), desc="Loading cameras...")
 
-    #loader_camera_train = DataLoader(scene.getTrainCameras(), batch_size=None, shuffle=False, num_workers=12, pin_memory=True, persistent_workers=True)
-    render_export_cam = [c for c in scene.getTrainCameras().cameras if c.image_name == render_export_cam_name][0]
-    render_export_cam = CameraDataset.load_camera_with_image_data(None, render_export_cam)
+    cameras = []
+    for i in range(len(train_cam_dataset)):
+        cameras.append(train_cam_dataset[i])
+        progress_bar.update()
+    progress_bar.close()
+    num_cams = len(cameras)
+    assert num_cams == 56, f"Num cams expected to be 56, got {num_cams}"
     
-    # dsCams = scene.getShuffledTrainCamsWithFirstCamSpecified(render_export_cam_name)
-    dsCams = scene.getTrainCameras()
-    loader_camera_train = DataLoader(dsCams, batch_size=None, shuffle=False, num_workers=32, pin_memory=False, persistent_workers=True)
-    iter_camera_train = iter(loader_camera_train)
-    
+    render_export_cam = [c for c in cameras if c.image_name == render_export_cam_name][0]
+    assert render_export_cam != None
 
     # viewpoint_stack = None
     ema_loss_for_log = 0.0
@@ -125,19 +129,13 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             gaussians.oneupSHdegree()
 
         # Me: Get next train cam from iter or loop if end is reached
-        print("Choosing cam...")
+        # print("Choosing cam...")
         is_render_export_iter = (iteration in export_fixed_iters) or ((iteration % export_render_every_n_iters) == 0 and iteration <= export_until_iter)
         if (is_render_export_iter):
             viewpoint_cam = render_export_cam
         else:
-            try:
-                viewpoint_cam = next(iter_camera_train)
-            except StopIteration:
-                print(f"Reloading Camera Iterator... ({iteration})")
-                iter_camera_train = iter(loader_camera_train)
-                viewpoint_cam = next(iter_camera_train)
-        print(viewpoint_cam.image_name)
-
+            viewpoint_cam = cameras[iteration % num_cams]
+        # print(viewpoint_cam.image_name)
 
         # Render
         if (iteration - 1) == debug_from:
@@ -145,9 +143,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         render_pkg = render(viewpoint_cam, gaussians, pipe, background)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
         if (is_render_export_iter):
-            print("Exporting render...")
             save_tensor_as_image(image, render_export_cam.image_name, iteration, training_start_time)
-            print("Finished exporting!")
 
         # sanity check
         black_pixels_mask = torch.all(image == 0, dim=0)

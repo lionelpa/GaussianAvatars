@@ -39,6 +39,7 @@ class CameraDataset(torch.utils.data.Dataset):
         if isinstance(idx, int):
             # ---- from readCamerasFromTransforms() ----
             camera = self.cameras[idx]
+            # print("Loading cam image", camera.image_name)
             return self.load_camera_with_image_data(camera)
         elif isinstance(idx, slice):
             return CameraDataset(self.cameras[idx])
@@ -62,6 +63,7 @@ class CameraDataset(torch.utils.data.Dataset):
             gt_alpha_mask = resized_image_rgb[3:4, ...]
             image *= gt_alpha_mask
         camera.original_image = image.clamp(0.0, 1.0)
+        # print(f"{camera.image.size}")
         return camera
 
 class Scene:

@@ -28,7 +28,7 @@ def error_map(img1, img2):
     error_map = cmap(error.cpu())
     return torch.from_numpy(error_map[..., :3]).permute(2, 0, 1)
 
-def save_tensor_as_image(tensor, cam_name, iteration, training_start_time, output_dir="output/cam_renders"):
+def save_tensor_as_image(tensor, cam_name, iteration, training_start_time, output_dir="output/cam_renders", force_tensor_to_cpu=True):
     """
     Convert a 3xHxW image tensor to a PIL image and save it to the specified path. Creates the directory if it doesn't exist.
 
@@ -37,7 +37,8 @@ def save_tensor_as_image(tensor, cam_name, iteration, training_start_time, outpu
     - output_path (str): The path where the image should be saved.
     """
     # Ensure the tensor is on the CPU
-    tensor = tensor.cpu()
+    if force_tensor_to_cpu:
+        tensor = tensor.cpu()
 
     # Permute the tensor to (H, W, C) format and convert to a numpy array
     image_np = tensor.permute(1, 2, 0).detach().numpy()
