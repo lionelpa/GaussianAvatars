@@ -42,7 +42,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     render_export_cam_name = "D4"
     export_render_every_n_iters = 100
     export_until_iter = 1500
-    export_fixed_iters = [1, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 40000, 100000, 300000, 590000, 600000]
+    export_fixed_iters = [1, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 40000, 60000, 100000, 200000, 300000, 400000, 500000, 599000, 600000]
     training_start_time = datetime.now()
 
     gaussians = LS7GaussianModel(dataset.sh_degree)
@@ -64,6 +64,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
     cameras = []
     for i in range(len(train_cam_dataset)):
+    # for i in range(1):
         cameras.append(train_cam_dataset[i])
         progress_bar.update()
     progress_bar.close()
@@ -71,6 +72,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     assert num_cams == 56, f"Num cams expected to be 56, got {num_cams}"
     
     render_export_cam = [c for c in cameras if c.image_name == render_export_cam_name][0]
+    # render_export_cam = cameras[0]
     assert render_export_cam != None
 
     # viewpoint_stack = None
@@ -136,6 +138,15 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         else:
             viewpoint_cam = cameras[iteration % num_cams]
         # print(viewpoint_cam.image_name)
+
+        # transform = transforms.Compose([
+        #     transforms.ToTensor(),  # Converts the PIL image to a tensor with shape (3, H, W) and values in [0, 1]
+        # ])
+        # Apply the transformation
+        # image = transform(render_export_cam.image)
+        # print("image shape", image.shape)
+        # save_tensor_as_image(image, "TEST", "1337", training_start_time)
+        # raise Exception("BRUH")
 
         # Render
         if (iteration - 1) == debug_from:
@@ -227,6 +238,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
             # Log (and save)
             training_report(tb_writer, iteration, losses, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
+            if (iteration in saving_iterations):
+                print("[ITER {}] Saving Gaussians".format(iteration))
+                scene.save(iteration)
 
             # Densification
             if iteration < opt.densify_until_iter:
@@ -373,6 +387,8 @@ if __name__ == "__main__":
         args.test_iterations.extend(list(range(args.interval, args.iterations+1, args.interval)))
     if len(args.save_iterations) == 0:
         args.save_iterations.extend(list(range(args.interval, args.iterations+1, args.interval)))
+        args.save_iterations = [1] + args.save_iterations
+        print(args.save_iterations[0])
     if len(args.checkpoint_iterations) == 0:
         args.checkpoint_iterations.extend(list(range(args.interval, args.iterations+1, args.interval)))
     

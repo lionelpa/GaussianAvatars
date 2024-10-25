@@ -52,6 +52,13 @@ class CameraDataset(torch.utils.data.Dataset):
             image = Image.open(camera.image_path)
         else:
             image = camera.image
+
+        width = image.width
+        height = image.height
+        if height != 6024 or width != 4020:
+            print(f"Camera {camera.image_name} has incorrect size: {camera.image.size}")
+            raise Exception("Incorrect image")
+        
         im_data = np.array(image.convert("RGBA"))
         norm_data = im_data / 255.0
         arr = norm_data[:, :, :3] * norm_data[:, :, 3:4] + camera.bg * (1 - norm_data[:, :, 3:4])
@@ -62,8 +69,7 @@ class CameraDataset(torch.utils.data.Dataset):
         if resized_image_rgb.shape[1] == 4:
             gt_alpha_mask = resized_image_rgb[3:4, ...]
             image *= gt_alpha_mask
-        camera.original_image = image.clamp(0.0, 1.0)
-        # print(f"{camera.image.size}")
+        camera.original_image = image.clamp(0.0, 1.0)       
         return camera
 
 class Scene:
