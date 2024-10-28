@@ -8,23 +8,25 @@
 
 import json
 import math
-import tyro
-from dataclasses import dataclass, field
-from typing import Literal, Optional
-from pathlib import Path
 import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Literal, Optional
+
 import dearpygui.dearpygui as dpg
+import matplotlib
 import numpy as np
 import torch
+import tyro
 from PIL import Image
-from scipy.spatial.transform import Rotation as R
 from scipy.interpolate import interp1d
-import matplotlib
+from scipy.spatial.transform import Rotation as R
 
-from utils.viewer_utils import Mini3DViewer, Mini3DViewerConfig
-from gaussian_renderer import GaussianModel, FlameGaussianModel
+from gaussian_renderer import FlameGaussianModel
 from gaussian_renderer import render
 from mesh_renderer import NVDiffRenderer
+from scene.ls7_gaussian_model import LS7GaussianModel
+from utils.viewer_utils import Mini3DViewer, Mini3DViewerConfig
 
 
 @dataclass
@@ -81,18 +83,7 @@ class LocalViewer(Mini3DViewer):
             print("Initializing mesh renderer...")
             self.mesh_renderer = NVDiffRenderer(use_opengl=False)
         
-        # FLAME parameters
-        if self.gaussians.binding is not None:
-            print("Initializing FLAME parameters...")
-            self.reset_flame_param()
-        
         super().__init__(cfg, 'GaussianAvatars - Local Viewer')
-
-        if self.gaussians.binding is not None:
-            self.num_timesteps = self.gaussians.num_timesteps
-            dpg.configure_item("_slider_timestep", max_value=self.num_timesteps - 1)
-
-            self.gaussians.select_mesh_by_timestep(self.timestep)
 
     def init_gaussians(self):
         # load gaussians
@@ -100,7 +91,7 @@ class LocalViewer(Mini3DViewer):
         if motion_path.exists():
             self.gaussians = FlameGaussianModel(self.cfg.sh_degree)
         else:
-            self.gaussians = GaussianModel(self.cfg.sh_degree)
+            self.gaussians = LS7GaussianModel(self.cfg.sh_degree)
 
         # selected_fid = self.gaussians.flame_model.mask.get_fid_by_region(['left_half'])
         # selected_fid = self.gaussians.flame_model.mask.get_fid_by_region(['right_half'])
@@ -429,165 +420,9 @@ class LocalViewer(Mini3DViewer):
                 dpg.add_button(label="clear cache", tag="_button_clear_cache", callback=callback_clear_cache, show=not self.cfg.demo_mode)
                 
         # window: recording ==================================================================================================
-        with dpg.window(label="Record", tag="_record_window", autosize=True, pos=(0, self.H//2)):
-            dpg.add_text("Keyframes")
-            with dpg.group(horizontal=True):
-                # list keyframes
-                def callback_set_current_keyframe(sender, app_data):
-                    idx = int(dpg.get_value("_listbox_keyframes"))
-                    self.apply_state_dict(self.keyframes[idx])
-
-                    record_timestep = sum([keyframe['interval'] for keyframe in self.keyframes[:idx]])
-                    dpg.set_value("_slider_record_timestep", record_timestep)
-
-                    self.need_update = True
-                dpg.add_listbox(self.keyframes, width=200, tag="_listbox_keyframes", callback=callback_set_current_keyframe)
-
-                # edit keyframes
-                with dpg.group():
-                    # add
-                    def callback_add_keyframe(sender, app_data):
-                        if len(self.keyframes) == 0:
-                            new_idx = 0
-                        else:
-                            new_idx = int(dpg.get_value("_listbox_keyframes")) + 1
-
-                        states = self.get_state_dict()
-                        
-                        self.keyframes.insert(new_idx, states)
-                        dpg.configure_item("_listbox_keyframes", items=list(range(len(self.keyframes))))
-                        dpg.set_value("_listbox_keyframes", new_idx)
-
-                        self.update_record_timeline()
-                    dpg.add_button(label="add", tag="_button_add_keyframe", callback=callback_add_keyframe)
-
-                    # delete
-                    def callback_delete_keyframe(sender, app_data):
-                        idx = int(dpg.get_value("_listbox_keyframes"))
-                        self.keyframes.pop(idx)
-                        dpg.configure_item("_listbox_keyframes", items=list(range(len(self.keyframes))))
-                        dpg.set_value("_listbox_keyframes", idx-1)
-
-                        self.update_record_timeline()
-                    dpg.add_button(label="delete", tag="_button_delete_keyframe", callback=callback_delete_keyframe)
-
-                    # update
-                    def callback_update_keyframe(sender, app_data):
-                        if len(self.keyframes) == 0:
-                            return
-                        else:
-                            idx = int(dpg.get_value("_listbox_keyframes"))
-
-                        states = self.get_state_dict()
-                        states['interval'] = self.cfg.fps*self.cfg.keyframe_interval
-
-                        self.keyframes[idx] = states
-                    dpg.add_button(label="update", tag="_button_update_keyframe", callback=callback_update_keyframe)
-
-            with dpg.group(horizontal=True):
-                def callback_set_record_cycles(sender, app_data):
-                    self.update_record_timeline()
-                dpg.add_input_int(label="cycles", tag="_input_cycles", default_value=0, width=70, callback=callback_set_record_cycles)
-
-                def callback_set_keyframe_interval(sender, app_data):
-                    self.cfg.keyframe_interval = app_data
-                    for keyframe in self.keyframes:
-                        keyframe['interval'] = self.cfg.fps*self.cfg.keyframe_interval
-                    self.update_record_timeline()
-                dpg.add_input_int(label="interval", tag="_input_interval", default_value=self.cfg.keyframe_interval, width=70, callback=callback_set_keyframe_interval)
-            
-            def callback_set_record_timestep(sender, app_data):
-                state_dict = self.get_state_dict_record()
-                
-                self.apply_state_dict(state_dict)
-                self.need_update = True
-            dpg.add_slider_int(label="timeline", tag='_slider_record_timestep', width=200, min_value=0, max_value=0, format="%d", default_value=0, callback=callback_set_record_timestep)
-            
-            with dpg.group(horizontal=True):
-                dpg.add_checkbox(label="dynamic", default_value=False, tag="_checkbox_dynamic_record")
-                dpg.add_checkbox(label="loop", default_value=True, tag="_checkbox_loop_record")
-            
-            with dpg.group(horizontal=True):
-                def callback_play(sender, app_data):
-                    self.playing = not self.playing
-                    self.need_update = True
-                dpg.add_button(label="play", tag="_button_play", callback=callback_play)
-
-                def callback_export_trajectory(sender, app_data):
-                    self.export_trajectory()
-                dpg.add_button(label="export traj", tag="_button_export_traj", callback=callback_export_trajectory)
-            
-            def callback_save_image(sender, app_data):
-                if not self.cfg.save_folder.exists():
-                    self.cfg.save_folder.mkdir(parents=True)
-                path = self.cfg.save_folder / f"{time.strftime('%Y-%m-%d_%H-%M-%S')}_{self.timestep}.png"
-                print(f"Saving image to {path}")
-                Image.fromarray((np.clip(self.render_buffer, 0, 1) * 255).astype(np.uint8)).save(path)
-            with dpg.group(horizontal=True):
-                dpg.add_button(label="save image", tag="_button_save_image", callback=callback_save_image)
 
         # window: FLAME ==================================================================================================
-        if self.gaussians.binding is not None:
-            with dpg.window(label="FLAME parameters", tag="_flame_window", autosize=True, pos=(self.W-300, 0)):
-                def callback_enable_control(sender, app_data):
-                    if app_data:
-                        self.gaussians.update_mesh_by_param_dict(self.flame_param)
-                    else:
-                        self.gaussians.select_mesh_by_timestep(self.timestep)
-                    self.need_update = True
-                dpg.add_checkbox(label="enable control", default_value=False, tag="_checkbox_enable_control", callback=callback_enable_control)
-
-                dpg.add_separator()
-
-                def callback_set_pose(sender, app_data):
-                    joint, axis = sender.split('-')[1:3]
-                    axis_idx = {'x': 0, 'y': 1, 'z': 2}[axis]
-                    self.flame_param[joint][0, axis_idx] = app_data
-                    if joint == 'eyes':
-                        self.flame_param[joint][0, 3+axis_idx] = app_data
-                    if not dpg.get_value("_checkbox_enable_control"):
-                        dpg.set_value("_checkbox_enable_control", True)
-                    self.gaussians.update_mesh_by_param_dict(self.flame_param)
-                    self.need_update = True
-                dpg.add_text(f'Joints')
-                self.pose_sliders = []
-                max_rot = 0.5
-                for joint in ['neck', 'jaw', 'eyes']:
-                    if joint in self.flame_param:
-                        with dpg.group(horizontal=True):
-                            dpg.add_slider_float(min_value=-max_rot, max_value=max_rot, format="%.2f", default_value=self.flame_param[joint][0, 0], callback=callback_set_pose, tag=f"_slider-{joint}-x", width=70)
-                            dpg.add_slider_float(min_value=-max_rot, max_value=max_rot, format="%.2f", default_value=self.flame_param[joint][0, 1], callback=callback_set_pose, tag=f"_slider-{joint}-y", width=70)
-                            dpg.add_slider_float(min_value=-max_rot, max_value=max_rot, format="%.2f", default_value=self.flame_param[joint][0, 2], callback=callback_set_pose, tag=f"_slider-{joint}-z", width=70)
-                            self.pose_sliders.append(f"_slider-{joint}-x")
-                            self.pose_sliders.append(f"_slider-{joint}-y")
-                            self.pose_sliders.append(f"_slider-{joint}-z")
-                            dpg.add_text(f'{joint:4s}')
-                dpg.add_text('   roll       pitch      yaw')
-                
-                dpg.add_separator()
-                
-                def callback_set_expr(sender, app_data):
-                    expr_i = int(sender.split('-')[2])
-                    self.flame_param['expr'][0, expr_i] = app_data
-                    if not dpg.get_value("_checkbox_enable_control"):
-                        dpg.set_value("_checkbox_enable_control", True)
-                    self.gaussians.update_mesh_by_param_dict(self.flame_param)
-                    self.need_update = True
-                self.expr_sliders = []
-                dpg.add_text(f'Expressions')
-                for i in range(5):
-                    dpg.add_slider_float(label=f"{i}", min_value=-3, max_value=3, format="%.2f", default_value=0, callback=callback_set_expr, tag=f"_slider-expr-{i}", width=250)
-                    self.expr_sliders.append(f"_slider-expr-{i}")
-
-                def callback_reset_flame(sender, app_data):
-                    self.reset_flame_param()
-                    if not dpg.get_value("_checkbox_enable_control"):
-                        dpg.set_value("_checkbox_enable_control", True)
-                    self.gaussians.update_mesh_by_param_dict(self.flame_param)
-                    self.need_update = True
-                    for slider in self.pose_sliders + self.expr_sliders:
-                        dpg.set_value(slider, 0)
-                dpg.add_button(label="reset FLAME", tag="_button_reset_flame", callback=callback_reset_flame)
+        # removed
 
         # widget-dependent handlers ========================================================================================
         with dpg.handler_registry():
