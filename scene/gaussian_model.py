@@ -193,7 +193,8 @@ class GaussianModel:
             assert self.binding is not None
             num_pts = self.binding.shape[0]
             fused_point_cloud = torch.zeros((num_pts, 3)).float().cuda()
-            fused_color = torch.tensor(np.random.random((num_pts, 3)) / 255.0).float().cuda()
+            # fused_color = torch.tensor(np.random.random((num_pts, 3))).float().cuda()
+            fused_color = torch.tensor(self.calc_init_tri_color()).float().cuda()
         else:
             raise Exception("Should not happen when using rigged gaussians")
             fused_point_cloud = torch.tensor(np.asarray(pcd.points)).float().cuda()
@@ -308,21 +309,22 @@ class GaussianModel:
         ## global XYZ
         xyz = self.get_xyz.detach().cpu().numpy()
         normals = np.zeros_like(xyz)
-        ## color between 0 and 1 need to be mult by 255
+        ## color in feature_dc is between 0 and 1. It needs to be mult by 255 and saved in .ply as uint8 (which is uchar) to 
+        ## be a read correctly by e.g. meshlab
         color = self._features_dc.detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()*255
 
         # For debug append camera data for visualization
         ## append cam data
         cam_color = {
-            "A": [1,0,0],
-            "B": [1,1,1],
-            "C": [1,1,1],
-            "D": [0,0,1],
-            "E": [0,0,1],
-            "F": [1,1,1],
-            "G": [1,1,1],
-            "H": [1,0,0],
-            "T": [1,1,1]
+            "A": [255, 0, 0],
+            "B": [255, 255, 255],
+            "C": [255, 255, 255],
+            "D": [0, 0, 255],
+            "E": [0, 0, 255],
+            "F": [255, 255, 255],
+            "G": [255, 255, 255],
+            "H": [255, 0, 0],
+            "T": [255, 255, 255]
         }
 
         # # For debug append camera data for visualization
@@ -350,13 +352,13 @@ class GaussianModel:
                     new_xyz = cam.camera_center + step
 
                     xyz = np.vstack([xyz, new_xyz])
-                    color = np.vstack([color, [0.2 * x for x in cam_color[cam.image_name[0]]]])
+                    color = np.vstack([color, [0.5 * x for x in cam_color[cam.image_name[0]]]])
                     normals = np.vstack([normals, [0, 0, 0]])
 
         if render_debug_origin:
-            cyan = [0,1,1]
-            yellow = [1,1,0]
-            magenta = [1,0,1]
+            cyan = [0, 255, 255]
+            yellow = [255, 255, 0]
+            magenta = [255, 0, 255]
 
             step_size = 0.05
             for i in range(0, 20):
@@ -373,7 +375,7 @@ class GaussianModel:
                 normals = np.vstack([normals, [0, 0, 0]])
 
                 # forward (z)
-                step = np.array([0,0, step_size * i])
+                step = np.array([0, 0, step_size * i])
                 xyz = np.vstack([xyz, step])
                 color = np.vstack([color, yellow])
                 normals = np.vstack([normals, [0, 0, 0]])
@@ -385,7 +387,7 @@ class GaussianModel:
         dtype_full = [
             ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),  # XYZ coordinates
             ('nx', 'f4'), ('ny', 'f4'), ('nz', 'f4'),  # Normals (set to zero)
-            ('red', 'f4'), ('green', 'f4'), ('blue', 'f4')  # Color channels
+            ('red', 'uint8'), ('green', 'uint8'), ('blue', 'uint8')  # Color channels
         ]
 
         elements = np.empty(xyz.shape[0], dtype=dtype_full)
@@ -638,3 +640,30 @@ class GaussianModel:
     def add_densification_stats(self, viewspace_point_tensor, update_filter):
         self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
         self.denom[update_filter] += 1
+    
+    def calc_init_tri_color(self):
+        b = True
+        triangle_colors = []
+        for face, face_uv in zip(self.faces, self.faces_uvs):  # Zip for consistent UV mapping
+            uv1, uv2, uv3 = self.verts_uvs[face_uv[0]], self.verts_uvs[face_uv[1]], self.verts_uvs[face_uv[2]]
+
+            # average uvs
+            uv_center = (uv1 + uv2 + uv3) / 3
+            u, v = uv_center
+
+            # get pixel pos
+            tex_x = int((u) * (self.texture.shape[1] - 1))
+            tex_y = int((1-v) * (self.texture.shape[0] - 1))  # y is flipped
+
+            # Ensure tex_x and tex_y stay within bounds
+            tex_x = np.clip(tex_x, 0, self.texture.shape[1] - 1)
+            tex_y = np.clip(tex_y, 0, self.texture.shape[0] - 1)
+            # color at the texture coordinates
+            # texture is accessed using x=lineindex, y=colindex
+            # discard alpha
+            # values in [0,255]
+            color = self.texture[tex_y, tex_x][:3]
+
+            triangle_colors.append(color)
+
+        return np.array(triangle_colors) / 255.0

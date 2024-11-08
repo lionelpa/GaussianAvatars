@@ -1,6 +1,8 @@
 # custom
 .idea/
 flame_model/
+ls7_model/assets/
+!ls7_model/assets/final_fit_invtrans_bodyscan.obj
 # end custom
 
 *.pyc

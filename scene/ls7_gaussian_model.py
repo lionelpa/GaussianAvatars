@@ -26,7 +26,10 @@ class LS7GaussianModel(GaussianModel):
         # load LS7 model and move it to GPU using cuda()
         self.ls7_model = LS7Model().cuda()
         self.verts = self.ls7_model.verts
+        self.verts_uvs = self.ls7_model.verts_uvs
         self.faces = self.ls7_model.faces
+        self.faces_uvs = self.ls7_model.faces_uvs
+        self.texture = self.ls7_model.texture
 
         # position
         self.face_center = self.calculate_face_centers(self.verts, self.faces)
