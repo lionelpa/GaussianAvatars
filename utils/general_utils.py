@@ -9,11 +9,15 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
-import torch
+import random
 import sys
 from datetime import datetime
+
 import numpy as np
-import random
+import torch
+
+from scene.camera_info import CameraInfo
+
 
 def inverse_sigmoid(x):
     return torch.log(x/(1-x))
@@ -152,3 +156,97 @@ def rotation_matrix_from_vectors(vec1, vec2):
     R = np.eye(3) + vx + vx @ vx * ((1 - c) / (s ** 2))
 
     return R
+
+
+def get_cam_pos_and_R(cams):
+    cams_poss = []
+    cams_Rs = []
+    for c in cams:
+        m = np.eye(4)
+        m[:3, :3] = np.transpose(c.R)  # Set the rotation matrix R (upper-left 3x3 block)
+        m[:3, 3] = c.T
+
+        inv_m = np.linalg.inv(m)
+        cams_poss.append(inv_m[:3,3])
+        cams_Rs.append(inv_m[:3,:3])
+    return np.array(cams_poss), np.array(cams_Rs)
+
+def transform_colmap_cams_onto_hylec_cams(colmap_cams, hylec_cams):
+
+    colmap_cams, hylec_cams = filter_cameras_by_common_images_names(colmap_cams, hylec_cams)
+
+    # used to get position and rotation from non-inverted camera-transform
+    c_cams_xyz, c_cams_Rs = get_cam_pos_and_R(colmap_cams)
+    h_cams_xyz, _ = get_cam_pos_and_R(hylec_cams)
+
+    # Step 1: Compute centroids of A and B
+    centroid_C = np.mean(c_cams_xyz, axis=0)
+    centroid_H = np.mean(h_cams_xyz, axis=0)
+
+    # Step 2: Center the points by subtracting centroids
+    C_centered = c_cams_xyz - centroid_C
+    H_centered = h_cams_xyz - centroid_H
+
+    # Step 3: Compute covariance matrix
+    H = np.dot(C_centered.T, H_centered)
+
+    # Step 4: Perform SVD on the covariance matrix
+    U, S, Vt = np.linalg.svd(H)
+
+    # Step 5: Compute the rotation matrix
+    R = np.dot(Vt.T, U.T)
+
+    # Handle special case of reflection
+    if np.linalg.det(R) < 0:
+        Vt[2, :] *= -1
+        R = np.dot(Vt.T, U.T)
+
+    # Step 6: Compute the scaling factor
+    # Scaling factor is the ratio of the norms (lengths) of the centered point clouds
+    scale_factor = np.sum(S) / np.sum(np.linalg.norm(C_centered, axis=1) ** 2)
+    print("scale factor", scale_factor)
+
+    # Step 7: Compute the translation
+    t = centroid_H - np.dot(R, centroid_C) * scale_factor
+
+    # cam.R is the transposed w2c rot
+    # cam.T is the w2c translation vec
+    for i, cam in enumerate(colmap_cams):
+        RR = np.dot(R, c_cams_Rs[i])
+        TT = np.dot(R, c_cams_xyz[i]) + t
+
+        # Create the scaling matrix
+        scale_matrix = np.eye(4)
+        scale_matrix[:3, :3] = scale_factor * np.eye(3)  # Apply scaling factor to the rotation part
+
+        # Create the transformation matrix that applies rotation, scaling and translation
+        m = np.eye(4)
+        m[:3, :3] = RR  # Set the rotation matrix (scaled)
+        m[:3, 3] = TT  # Set the translation vector (scaled)
+        m = np.dot(scale_matrix, m)
+
+        # Apply the inverse of the transformation matrix to store for further processing
+        m = np.linalg.inv(m)
+        # Extract the new rotation and translation from the updated w2c matrix
+        new_R = np.transpose(m[:3, :3])
+        new_T = m[:3, 3]
+
+        # Update the camera with the new values
+        colmap_cams[i] = CameraInfo(uid=cam.uid, R=new_R, T=new_T, FovY=cam.FovY, FovX=cam.FovX, image=cam.image,
+                                    image_path=cam.image_path, image_name=cam.image_name, width=cam.width,
+                                    height=cam.height)
+
+    return colmap_cams
+
+
+def filter_cameras_by_common_images_names(list1, list2):
+    # Extract image names from both lists
+    image_names1 = {camera.image_name for camera in list1 if camera.image_name[0] != "T"}
+    image_names2 = {camera.image_name for camera in list2 if camera.image_name[0] != "T"}
+
+    common_image_names = image_names1.intersection(image_names2)
+
+    filtered_list1 = [camera for camera in list1 if camera.image_name in common_image_names]
+    filtered_list2 = [camera for camera in list2 if camera.image_name in common_image_names]
+
+    return filtered_list1, filtered_list2
