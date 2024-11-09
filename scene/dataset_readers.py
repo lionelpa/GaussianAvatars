@@ -9,22 +9,23 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
+import json
 import os
 import sys
-from PIL import Image
+import xml.etree.ElementTree as ET
+from pathlib import Path
 from typing import NamedTuple, Optional
+
+import numpy as np
+from PIL import Image
+from plyfile import PlyData, PlyElement
 from tqdm import tqdm
+
 from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec2rotmat, \
     read_extrinsics_binary, read_intrinsics_binary, read_points3D_binary, read_points3D_text
+from scene.gaussian_model import BasicPointCloud
 from utils.camera_utils import extract_c2w_mat_from_xml_string
 from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
-import numpy as np
-import json
-from pathlib import Path
-from plyfile import PlyData, PlyElement
-from utils.sh_utils import SH2RGB
-from scene.gaussian_model import BasicPointCloud
-import xml.etree.ElementTree as ET
 
 
 class CameraInfo(NamedTuple):
@@ -168,11 +169,15 @@ def readLS7ColmapSceneInfo(path, images, eval, llffhold=8):
     """
     Only load camera infos and nerf normalization. Disregard point cloud since the initial point cloud depends on the topology of the mesh.
     """
-    test_cam_infos, train_cam_infos = readColmapCameraInfos(eval, images, llffhold, path)
-    nerf_normalization = getNerfppNorm(train_cam_infos)
+    test_cam_infos, colmap_train_cam_infos = readColmapCameraInfos(eval, images, llffhold, path)
+    nerf_normalization = getNerfppNorm(colmap_train_cam_infos)
+
+    hylec_train_cam_infos = readLS7XMLSceneInfo(path, images).train_cameras
+
+    transformed_cam_infos = transform_colmap_cams_onto_hylec_cams(colmap_train_cam_infos, hylec_train_cam_infos)
 
     scene_info = SceneInfo(point_cloud=None,
-                           train_cameras=train_cam_infos,
+                           train_cameras=transformed_cam_infos,
                            test_cameras=test_cam_infos,
                            nerf_normalization=nerf_normalization,
                            ply_path=None)
@@ -426,6 +431,99 @@ def readDynamicNerfInfo(path, white_background, eval, extension=".png", target_p
                            tgt_train_meshes=tgt_train_mesh_infos,
                            tgt_test_meshes=tgt_test_mesh_infos)
     return scene_info
+
+def get_cam_pos_and_R(cams):
+    cams_poss = []
+    cams_Rs = []
+    for c in cams:
+        m = np.eye(4)
+        m[:3, :3] = np.transpose(c.R)  # Set the rotation matrix R (upper-left 3x3 block)
+        m[:3, 3] = c.T
+
+        inv_m = np.linalg.inv(m)
+        cams_poss.append(inv_m[:3,3])
+        cams_Rs.append(inv_m[:3,:3])
+    return np.array(cams_poss), np.array(cams_Rs)
+def transform_colmap_cams_onto_hylec_cams(colmap_cams, hylec_cams):
+
+    colmap_cams, hylec_cams = filter_cameras_by_common_images_names(colmap_cams, hylec_cams)
+
+    # used to get position and rotation from non-inverted camera-transform
+    c_cams_xyz, c_cams_Rs = get_cam_pos_and_R(colmap_cams)
+    h_cams_xyz, _ = get_cam_pos_and_R(hylec_cams)
+
+    # Step 1: Compute centroids of A and B
+    centroid_C = np.mean(c_cams_xyz, axis=0)
+    centroid_H = np.mean(h_cams_xyz, axis=0)
+
+    # Step 2: Center the points by subtracting centroids
+    C_centered = c_cams_xyz - centroid_C
+    H_centered = h_cams_xyz - centroid_H
+
+    # Step 3: Compute covariance matrix
+    H = np.dot(C_centered.T, H_centered)
+
+    # Step 4: Perform SVD on the covariance matrix
+    U, S, Vt = np.linalg.svd(H)
+
+    # Step 5: Compute the rotation matrix
+    R = np.dot(Vt.T, U.T)
+
+    # Handle special case of reflection
+    if np.linalg.det(R) < 0:
+        Vt[2, :] *= -1
+        R = np.dot(Vt.T, U.T)
+
+    # Step 6: Compute the scaling factor
+    # Scaling factor is the ratio of the norms (lengths) of the centered point clouds
+    scale_factor = np.sum(S) / np.sum(np.linalg.norm(C_centered, axis=1) ** 2)
+    print("scale factor", scale_factor)
+
+    # Step 7: Compute the translation
+    t = centroid_H - np.dot(R, centroid_C) * scale_factor
+
+    # cam.R is the transposed w2c rot
+    # cam.T is the w2c translation vec
+    for i, cam in enumerate(colmap_cams):
+        scale_matrix = np.eye(4)
+        scale_matrix[:3, :3] = scale_factor * np.eye(3)  # Apply scaling factor to the rotation part
+
+        # update rotation and translation of c2w matrix
+        ## update rotation using rotation only
+        RR = np.dot(R, c_cams_Rs[i])
+        ## udate translation using scale -> rotate -> scaled translate
+        TT = np.dot(R, np.dot(scale_matrix[:3,:3], c_cams_xyz[i])) + t
+
+        # Create 4x4 c2w transformation matrix
+        m = np.eye(4)
+        m[:3, :3] = RR
+        m[:3, 3] = TT
+
+        # Create 4x4 w2c transform matrix
+        m = np.linalg.inv(m)
+        new_R = np.transpose(m[:3, :3]) # transpose because of convention
+        new_T = m[:3, 3]
+
+        # Update the camera
+        colmap_cams[i] = CameraInfo(uid=cam.uid, R=new_R, T=new_T, FovY=cam.FovY, FovX=cam.FovX, image=cam.image,
+                                    image_path=cam.image_path, image_name=cam.image_name, width=cam.width,
+                                    height=cam.height)
+
+    return colmap_cams
+
+
+def filter_cameras_by_common_images_names(list1, list2):
+    # Extract image names from both lists
+    # Top cams badly detected by colmap
+    image_names1 = {c.image_name for c in list1 if c.image_name[0] != "T"}
+    image_names2 = {c.image_name for c in list2 if c.image_name[0] != "T"}
+
+    common_image_names = image_names1.intersection(image_names2)
+
+    filtered_list1 = [c for c in list1 if c.image_name in common_image_names]
+    filtered_list2 = [c for c in list2 if c.image_name in common_image_names]
+
+    return filtered_list1, filtered_list2
 
 sceneLoadTypeCallbacks = {
     "LS7Colmap": readLS7ColmapSceneInfo,

@@ -9,22 +9,25 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
-import os
-from copy import deepcopy
-import random
 import json
+import os
+import random
+from copy import deepcopy
 from typing import Union, List
+
 import numpy as np
 import torch
-from utils.system_utils import searchForMaxIteration
-from scene.dataset_readers import sceneLoadTypeCallbacks
-from scene.cameras import Camera
-from scene.gaussian_model import GaussianModel
-from scene.flame_gaussian_model import FlameGaussianModel
+from PIL import Image, ImageFile
+
 from arguments import ModelParams
+from scene.cameras import Camera
+from scene.dataset_readers import sceneLoadTypeCallbacks
+from scene.flame_gaussian_model import FlameGaussianModel
+from scene.gaussian_model import GaussianModel
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
 from utils.general_utils import PILtoTorch
-from PIL import Image, ImageFile
+from utils.system_utils import searchForMaxIteration
+
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
@@ -103,7 +106,10 @@ class Scene:
         # load dataset
         # for now we use colmap for photogrammetry, so we ignore camera params given by hylec
         assert os.path.exists(args.source_path), "Source path does not exist: {}".format(args.source_path)
-        if os.path.exists(os.path.join(args.source_path, "cameras.xml")):
+        if os.path.exists(os.path.join(args.source_path, "sparse")):
+            print(">>> INFO: Loading scene info using Colmap (LS7)!")
+            scene_info = sceneLoadTypeCallbacks["LS7Colmap"](args.source_path, args.images, args.eval)
+        elif os.path.exists(os.path.join(args.source_path, "cameras.xml")):
             print(">>> INFO: Loading scene info using CAMERAS.XML!")
             scene_info = sceneLoadTypeCallbacks["LS7XML"](args.source_path, args.images, args.eval)
         else:
