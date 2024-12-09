@@ -10,6 +10,8 @@
 #
 
 import os
+import json
+import random as rnd
 from datetime import datetime
 import torch
 from torch.utils.data import DataLoader
@@ -37,19 +39,20 @@ except ImportError:
     TENSORBOARD_FOUND = False
 
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
+    print("TB found", TENSORBOARD_FOUND)
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     render_export_cam_name = "D4"
     export_render_every_n_iters = 100
     export_until_iter = 1500
-    export_fixed_iters = [1, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 40000, 60000, 100000, 200000, 300000, 400000, 500000, 599000, 600000]
+    export_fixed_iters = [1, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 40000, 60000, 100000, 200000, 300000, 400000, 500000, 600000]
     training_start_time = datetime.now()
 
     gaussians = LS7GaussianModel(dataset.sh_degree)
     mesh_renderer = NVDiffRenderer()
 
     scene = Scene(dataset, gaussians)
-    #gaussians.save_ply_for_SIBR("./output/init_gaussians_hylec.ply", scene, render_debug_origin=True)
+    gaussians.save_ply_for_SIBR("./output/init_gaussians_hylec.ply", scene, render_debug_origin=True)
 
     gaussians.training_setup(opt)
 
@@ -60,19 +63,22 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     iter_end = torch.cuda.Event(enable_timing = True)
     
     train_cam_dataset = scene.getTrainCameras()
-    progress_bar = tqdm(range(1, len(train_cam_dataset)), desc="Loading cameras...")
+    progress_bar = tqdm(range(1, len(train_cam_dataset)+1), desc="Loading cameras...")
+
+    num_cams = len(train_cam_dataset)
+    # assert num_cams == 56, f"Num cams expected to be 56, got {num_cams}"
 
     cameras = []
     for i in range(len(train_cam_dataset)):
-    # for i in range(1):
         cameras.append(train_cam_dataset[i])
         progress_bar.update()
     progress_bar.close()
+    
     num_cams = len(cameras)
-    assert num_cams == 56, f"Num cams expected to be 56, got {num_cams}"
+    rnd.seed(0)
+    camera_it_idx = rnd.sample(range(num_cams), num_cams)
     
     render_export_cam = [c for c in cameras if c.image_name == render_export_cam_name][0]
-    # render_export_cam = cameras[0]
     assert render_export_cam != None
 
     # viewpoint_stack = None
@@ -136,17 +142,16 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         if (is_render_export_iter):
             viewpoint_cam = render_export_cam
         else:
-            viewpoint_cam = cameras[iteration % num_cams]
+            # reshuffle if all cameras chosen in epoch
+            idx = iteration % num_cams
+            if idx == 0:
+                # print("Reshuffling cameras...")
+                rnd.seed(iteration)
+                camera_it_idx = rnd.sample(range(num_cams), num_cams)
+                viewpoint_cam = cameras[camera_it_idx[idx]]
+            else:   
+                viewpoint_cam = cameras[camera_it_idx[idx]]
         # print(viewpoint_cam.image_name)
-
-        # transform = transforms.Compose([
-        #     transforms.ToTensor(),  # Converts the PIL image to a tensor with shape (3, H, W) and values in [0, 1]
-        # ])
-        # Apply the transformation
-        # image = transform(render_export_cam.image)
-        # print("image shape", image.shape)
-        # save_tensor_as_image(image, "TEST", "1337", training_start_time)
-        # raise Exception("BRUH")
 
         # Render
         if (iteration - 1) == debug_from:
@@ -205,6 +210,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         
         losses['total'] = sum([v for k, v in losses.items()])
         
+        # print(f"Loss 'l1'                : {losses.get('l1', -1)}")
+        # print(f"Loss 'ssim'              : {losses.get('ssim', -1)}")
         # print(f"Loss 'xyz'               : {losses.get('xyz', -1)}")
         # print(f"Loss 'scale'             : {losses.get('scale', -1)}")
         # print(f"Loss 'dy_off'            : {losses.get('dy_off', -1)}")
@@ -237,7 +244,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 progress_bar.close()
 
             # Log (and save)
-            training_report(tb_writer, iteration, losses, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
+            training_report(tb_writer, iteration, losses, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background), viewpoint_cam)
             if (iteration in saving_iterations):
                 print("[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
@@ -281,26 +288,32 @@ def prepare_output_and_logger(args):
     # Create Tensorboard writer
     tb_writer = None
     if TENSORBOARD_FOUND:
-        tb_writer = SummaryWriter(args.model_path)
+        tb_writer = SummaryWriter(args.model_path + "/runs")
     else:
         print("Tensorboard not available: not logging progress")
     return tb_writer
 
-def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs):
+def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs, cam):
     if tb_writer:
         tb_writer.add_scalar('train_loss_patches/l1_loss', losses['l1'].item(), iteration)
         tb_writer.add_scalar('train_loss_patches/ssim_loss', losses['ssim'].item(), iteration)
         if 'xyz' in losses:
             tb_writer.add_scalar('train_loss_patches/xyz_loss', losses['xyz'].item(), iteration)
+            tb_writer.add_scalar('traincam_{cam.image_name}_{cam.uid}/xyz_loss', losses['xyz'].item(), iteration)
         if 'scale' in losses:
             tb_writer.add_scalar('train_loss_patches/scale_loss', losses['scale'].item(), iteration)
+            tb_writer.add_scalar('traincam_{cam.image_name}_{cam.uid}/scale_loss', losses['scale'].item(), iteration)
         if 'dynamic_offset' in losses:
             tb_writer.add_scalar('train_loss_patches/dynamic_offset', losses['dynamic_offset'].item(), iteration)
+            tb_writer.add_scalar('traincam_{cam.image_name}_{cam.uid}/dynamic_offset', losses['dynamic_offset'].item(), iteration)
         if 'laplacian' in losses:
             tb_writer.add_scalar('train_loss_patches/laplacian', losses['laplacian'].item(), iteration)
+            tb_writer.add_scalar('traincam_{cam.image_name}_{cam.uid}/laplacian', losses['laplacian'].item(), iteration)
         if 'dynamic_offset_std' in losses:
             tb_writer.add_scalar('train_loss_patches/dynamic_offset_std', losses['dynamic_offset_std'].item(), iteration)
+            tb_writer.add_scalar('traincam_{cam.image_name}_{cam.uid}/dynamic_offset_std', losses['dynamic_offset_std'].item(), iteration)
         tb_writer.add_scalar('train_loss_patches/total_loss', losses['total'].item(), iteration)
+        tb_writer.add_scalar('traincam_{cam.image_name}_{cam.uid}/total_loss', losses['total'].item(), iteration)
         tb_writer.add_scalar('iter_time', elapsed, iteration)
 
     # Report test and samples of training set
@@ -364,6 +377,25 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
             tb_writer.add_scalar('total_points', scene.gaussians.get_xyz.shape[0], iteration)
         torch.cuda.empty_cache()
 
+def save_params_to_json(lp, op, pp, args, folder, filename="params_ga.json"):
+    # Ensure the output folder exists
+    os.makedirs(folder, exist_ok=True)
+    filepath = os.path.join(folder, filename)
+
+    # Use `vars()` to get the dictionary of each parameter group
+    params_dict = {
+        "ModelParams": vars(lp.extract(args)),
+        "OptimizationParams": vars(op.extract(args)),
+        "PipelineParams": vars(pp.extract(args)),
+        "GeneralArgs": vars(args)
+    }
+
+    # Write the dictionary to a JSON file
+    with open(filepath, 'w') as f:
+        json.dump(params_dict, f, indent=4)
+
+    print(f"Parameters saved to {filepath}")
+
 if __name__ == "__main__":
     # Set up command line argument parser
     parser = ArgumentParser(description="Training script parameters")
@@ -388,15 +420,18 @@ if __name__ == "__main__":
     if len(args.save_iterations) == 0:
         args.save_iterations.extend(list(range(args.interval, args.iterations+1, args.interval)))
         args.save_iterations = [1] + args.save_iterations
-        print(args.save_iterations[0])
     if len(args.checkpoint_iterations) == 0:
         args.checkpoint_iterations.extend(list(range(args.interval, args.iterations+1, args.interval)))
     
+    args.save_iterations.append(args.iterations)
     print("Optimizing " + args.model_path)
 
     # Initialize system state (RNG)
     safe_state(args.quiet)
 
+    # Save params as json
+    save_params_to_json(lp, op, pp, args, args.model_path, filename="params_ga.json")
+    
     # Start GUI server, configure and run training
     network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)

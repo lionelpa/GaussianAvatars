@@ -106,10 +106,7 @@ class Scene:
         # load dataset
         # for now we use colmap for photogrammetry, so we ignore camera params given by hylec
         assert os.path.exists(args.source_path), "Source path does not exist: {}".format(args.source_path)
-        if os.path.exists(os.path.join(args.source_path, "sparse")):
-            print(">>> INFO: Loading scene info using Colmap (LS7)!")
-            scene_info = sceneLoadTypeCallbacks["LS7Colmap"](args.source_path, args.images, args.eval)
-        elif os.path.exists(os.path.join(args.source_path, "cameras.xml")):
+        if os.path.exists(os.path.join(args.source_path, "cameras.xml")):
             print(">>> INFO: Loading scene info using CAMERAS.XML!")
             scene_info = sceneLoadTypeCallbacks["LS7XML"](args.source_path, args.images, args.eval)
         else:
