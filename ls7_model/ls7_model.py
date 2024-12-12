@@ -1,14 +1,16 @@
 from pathlib import Path
 
-from torch import nn
-from PIL import Image
 import numpy as np
+from PIL import Image
+from torch import nn
 
 from utils.pytorch3d_load_obj import load_obj
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-LS7_MESH_PATH_LIONEL = PROJECT_ROOT / "ls7_model/assets/final_fit_invtrans_bodyscan.obj"
-LS7_TEXTURE_PATH_LIONEL = PROJECT_ROOT / "ls7_model/assets/skin_basecolor_inv.png"
+LS7_MESH_PATH_LIONEL = PROJECT_ROOT / "ls7_model/assets/handy_pipeline/head/baked_mesh.obj"
+#LS7_MESH_PATH_LIONEL = PROJECT_ROOT / "ls7_model/assets/final_fit_invtrans_bodyscan.obj"
+LS7_TEXTURE_PATH_LIONEL = PROJECT_ROOT / "ls7_model/assets/handy_pipeline/head/baked_mesh_tex0.png"
+# LS7_TEXTURE_PATH_LIONEL = PROJECT_ROOT / "ls7_model/assets/skin_basecolor_inv.png"
 
 
 
@@ -36,22 +38,3 @@ class LS7Model(nn.Module):
 
         self.verts, self.verts_uvs, self.faces, self.faces_uvs = load_mesh(ls7_mesh_path)
         self.texture = load_texture(LS7_TEXTURE_PATH_LIONEL)
-
-        assert self.texture.shape[0] == 4096
-        assert self.texture.shape[1] == 4096
-
-        assert self.texture[10, 26][0] in [228, 200, 180]
-        assert self.texture[10, 26][1] in [228,200,180]
-        assert self.texture[10, 26][2] in [228,200,180]
-
-        assert self.texture[11, 26][0] in [168, 188, 199]
-        assert self.texture[11, 26][1] in [168, 188, 199]
-        assert self.texture[11, 26][2] in [168, 188, 199]
-
-        assert self.texture[1605, 26][0] in [228,200,180]
-        assert self.texture[1605, 26][1] in [228,200,180]
-        assert self.texture[1605, 26][2] in [228,200,180]
-
-        assert self.texture[1606, 26][0] in [151,146,153]
-        assert self.texture[1606, 26][1] in [151,146,153]
-        assert self.texture[1606, 26][2] in [151,146,153]

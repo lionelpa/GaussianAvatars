@@ -19,6 +19,7 @@ from typing import NamedTuple, Optional
 import numpy as np
 from PIL import Image
 from plyfile import PlyData, PlyElement
+from scipy.spatial.transform import Rotation as R
 from tqdm import tqdm
 
 from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec2rotmat, \
@@ -178,6 +179,78 @@ def readLS7ColmapSceneInfo(path, images, eval, llffhold=8):
 
     scene_info = SceneInfo(point_cloud=None,
                            train_cameras=transformed_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization,
+                           ply_path=None)
+    return scene_info
+
+
+def overwriteExtOfColmapWithPipelineExt(colmap_train_cam_infos, pipeline_cam_exts):
+    cam_infos_dict = {cam_info.image_name: cam_info for cam_info in colmap_train_cam_infos}
+
+    updated_cam_infos = []
+    for ext in pipeline_cam_exts:
+        colmap_cam_info = cam_infos_dict[ext["filename"][:-4]] # strip file ending
+        T = np.array(ext["T"])
+        rot_quat_arr = ext["rot_quat"] # w x y z from apple api
+
+        # for Camera obj we need R and T of the w2c matrix
+        c2w = np.array(R.from_quat([rot_quat_arr[1], rot_quat_arr[2], rot_quat_arr[3], rot_quat_arr[0]]).as_matrix())  # needs x y z w
+
+        # Create a 4x4 c2w matrix
+        c2w_matrix = np.eye(4)  # Start with identity matrix
+        c2w_matrix[:3, :3] = c2w  # Assign rotation matrix
+        c2w_matrix[:3, 2] *= -1  # Negate the z-axis because loaded camera forward-axis is inverted
+        c2w_matrix[:3, 3] = T  # Assign translation vector
+        w2c = np.linalg.inv(c2w_matrix)
+
+        new_R = np.transpose(w2c[:3, :3])
+        new_T = w2c[:3, 3]
+        updated_cam_info = CameraInfo(uid=colmap_cam_info.uid, R=new_R, T=new_T, FovY=colmap_cam_info.FovY, FovX=colmap_cam_info.FovX, image=colmap_cam_info.image,
+                              image_path=colmap_cam_info.image_path, image_name=colmap_cam_info.image_name, width=colmap_cam_info.width, height=colmap_cam_info.height)
+        updated_cam_infos.append(updated_cam_info)
+
+    return updated_cam_infos
+
+
+def parsePosesTxt(file_path):
+    with open(file_path, 'r') as file:
+        # Read the file and split it into blocks, one for each camera
+        blocks = file.read().strip().split("\n\n")
+
+    camera_data = []
+
+    for block in blocks:
+        # Initialize a dictionary to store camera details
+        camera_info = {}
+
+        # Process each line in the block
+        for line in block.splitlines():
+            line = line.strip()
+            if line.startswith("filename"):
+                camera_info["filename"] = line.split(" ", 1)[1]
+            elif line.startswith("translation"):
+                camera_info["T"] = list(map(float, line.split(" ")[1:]))
+            elif line.startswith("rotation"):
+                camera_info["rot_quat"] = list(map(float, line.split(" ")[1:]))
+
+        # Add the processed camera information to the list
+        camera_data.append(camera_info)
+
+    return camera_data
+
+def readLS7HandyPipelineExtWithColmapInt(path, images, eval, smartphone_pipeline_cams_poses_filename, llffhold=8):
+    """
+    Only load camera infos and nerf normalization. Disregard point cloud since the initial point cloud depends on the topology of the mesh.
+    """
+    test_cam_infos, colmap_train_cam_infos = readColmapCameraInfos(eval, images, llffhold, path)
+    nerf_normalization = getNerfppNorm(colmap_train_cam_infos)
+
+    pipeline_cam_exts = parsePosesTxt(os.path.join(path, smartphone_pipeline_cams_poses_filename))
+    modified_train_cam_infos = overwriteExtOfColmapWithPipelineExt(colmap_train_cam_infos, pipeline_cam_exts)
+
+    scene_info = SceneInfo(point_cloud=None,
+                           train_cameras=modified_train_cam_infos,
                            test_cameras=test_cam_infos,
                            nerf_normalization=nerf_normalization,
                            ply_path=None)
@@ -528,6 +601,7 @@ def filter_cameras_by_common_images_names(list1, list2):
 sceneLoadTypeCallbacks = {
     "LS7Colmap": readLS7ColmapSceneInfo,
     "LS7XML": readLS7XMLSceneInfo,
+    "LS7HandyPipelineExtWithColmapInt": readLS7HandyPipelineExtWithColmapInt,
     # "Colmap": readColmapSceneInfo,
     # "DynamicNerf" : readDynamicNerfInfo,
     # "Blender" : readNerfSyntheticInfo,
