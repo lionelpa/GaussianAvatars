@@ -345,7 +345,7 @@ class GaussianModel:
                 color = np.vstack([color, cam_color[cam.image_name[0]]])
                 normals = np.vstack([normals, [0, 0, 0]])
 
-                step_size = 0.1
+                step_size = scene.cameras_extent * 0.00125
                 for i in range(1, 5):
                     step = np.array([0, 0, step_size * i])
                     step = cam.R @ step
@@ -360,7 +360,7 @@ class GaussianModel:
             yellow = [255, 255, 0]
             magenta = [255, 0, 255]
 
-            step_size = 0.05
+            step_size = scene.cameras_extent * 0.0025
             for i in range(0, 20):
                 # right (x)
                 step = np.array([step_size * i, 0, 0])
