@@ -42,7 +42,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     print("TB found", TENSORBOARD_FOUND)
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
-    render_export_cam_name = "D4"
+    # render_export_cam_name = "D4"
+    render_export_cam_name = "HEAD_040"
     export_render_every_n_iters = 100
     export_until_iter = 1500
     export_fixed_iters = [1, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 40000, 60000, 100000, 200000, 300000, 400000, 500000, 600000]
@@ -66,7 +67,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     progress_bar = tqdm(range(1, len(train_cam_dataset)+1), desc="Loading cameras...")
 
     num_cams = len(train_cam_dataset)
-    # assert num_cams == 56, f"Num cams expected to be 56, got {num_cams}"
 
     cameras = []
     for i in range(len(train_cam_dataset)):
@@ -299,21 +299,21 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
         tb_writer.add_scalar('train_loss_patches/ssim_loss', losses['ssim'].item(), iteration)
         if 'xyz' in losses:
             tb_writer.add_scalar('train_loss_patches/xyz_loss', losses['xyz'].item(), iteration)
-            tb_writer.add_scalar('traincam_{cam.image_name}_{cam.uid}/xyz_loss', losses['xyz'].item(), iteration)
+            tb_writer.add_scalar(f'traincam_{cam.image_name}_{cam.uid}/xyz_loss', losses['xyz'].item(), iteration)
         if 'scale' in losses:
             tb_writer.add_scalar('train_loss_patches/scale_loss', losses['scale'].item(), iteration)
-            tb_writer.add_scalar('traincam_{cam.image_name}_{cam.uid}/scale_loss', losses['scale'].item(), iteration)
+            tb_writer.add_scalar(f'traincam_{cam.image_name}_{cam.uid}/scale_loss', losses['scale'].item(), iteration)
         if 'dynamic_offset' in losses:
             tb_writer.add_scalar('train_loss_patches/dynamic_offset', losses['dynamic_offset'].item(), iteration)
-            tb_writer.add_scalar('traincam_{cam.image_name}_{cam.uid}/dynamic_offset', losses['dynamic_offset'].item(), iteration)
+            tb_writer.add_scalar(f'traincam_{cam.image_name}_{cam.uid}/dynamic_offset', losses['dynamic_offset'].item(), iteration)
         if 'laplacian' in losses:
             tb_writer.add_scalar('train_loss_patches/laplacian', losses['laplacian'].item(), iteration)
-            tb_writer.add_scalar('traincam_{cam.image_name}_{cam.uid}/laplacian', losses['laplacian'].item(), iteration)
+            tb_writer.add_scalar(f'traincam_{cam.image_name}_{cam.uid}/laplacian', losses['laplacian'].item(), iteration)
         if 'dynamic_offset_std' in losses:
             tb_writer.add_scalar('train_loss_patches/dynamic_offset_std', losses['dynamic_offset_std'].item(), iteration)
-            tb_writer.add_scalar('traincam_{cam.image_name}_{cam.uid}/dynamic_offset_std', losses['dynamic_offset_std'].item(), iteration)
+            tb_writer.add_scalar(f'traincam_{cam.image_name}_{cam.uid}/dynamic_offset_std', losses['dynamic_offset_std'].item(), iteration)
         tb_writer.add_scalar('train_loss_patches/total_loss', losses['total'].item(), iteration)
-        tb_writer.add_scalar('traincam_{cam.image_name}_{cam.uid}/total_loss', losses['total'].item(), iteration)
+        tb_writer.add_scalar(f'traincam_{cam.image_name}_{cam.uid}/total_loss', losses['total'].item(), iteration)
         tb_writer.add_scalar('iter_time', elapsed, iteration)
 
     # Report test and samples of training set
@@ -407,7 +407,7 @@ if __name__ == "__main__":
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument("--interval", type=int, default=60_000, help="A shared iteration interval for test and saving results and checkpoints.")
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[1, 500, 5000, 30_000, 100000, 150000])
     parser.add_argument("--save_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])

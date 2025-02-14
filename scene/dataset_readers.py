@@ -200,7 +200,8 @@ def overwriteExtOfColmapWithPipelineExt(colmap_train_cam_infos, pipeline_cam_ext
         # Create a 4x4 c2w matrix
         c2w_matrix = np.eye(4)  # Start with identity matrix
         c2w_matrix[:3, :3] = c2w  # Assign rotation matrix
-        c2w_matrix[:3, 2] *= -1  # Negate the z-axis because loaded camera forward-axis is inverted
+        c2w_matrix[:3, 2] *= -1  # Flip the z-axis because loaded camera forward-axis is inverted
+        c2w_matrix[:3, 1] *= -1  # Flip the y-axis because loaded camera up-axis is inverted
         c2w_matrix[:3, 3] = T  # Assign translation vector
         w2c = np.linalg.inv(c2w_matrix)
 

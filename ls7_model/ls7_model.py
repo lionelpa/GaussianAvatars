@@ -7,7 +7,7 @@ from torch import nn
 from utils.pytorch3d_load_obj import load_obj
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-LS7_MESH_PATH_LIONEL = PROJECT_ROOT / "ls7_model/assets/handy_pipeline/head/baked_mesh.obj"
+LS7_MESH_PATH_LIONEL = PROJECT_ROOT / "ls7_model/assets/handy_pipeline/head/baked_mesh_reduced.obj"
 #LS7_MESH_PATH_LIONEL = PROJECT_ROOT / "ls7_model/assets/final_fit_invtrans_bodyscan.obj"
 LS7_TEXTURE_PATH_LIONEL = PROJECT_ROOT / "ls7_model/assets/handy_pipeline/head/baked_mesh_tex0.png"
 # LS7_TEXTURE_PATH_LIONEL = PROJECT_ROOT / "ls7_model/assets/skin_basecolor_inv.png"

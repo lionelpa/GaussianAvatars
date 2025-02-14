@@ -58,9 +58,6 @@ class CameraDataset(torch.utils.data.Dataset):
 
         width = image.width
         height = image.height
-        if height != 6024 or width != 4020:
-            print(f"Camera {camera.image_name} has incorrect size: {camera.image.size}")
-            raise Exception("Incorrect image")
         
         im_data = np.array(image.convert("RGBA"))
         norm_data = im_data / 255.0
@@ -108,6 +105,7 @@ class Scene:
         assert os.path.exists(args.source_path), "Source path does not exist: {}".format(args.source_path)
         if (os.path.exists(os.path.join(args.source_path, "sparse"))
             and os.path.exists(os.path.join(args.source_path, args.smartphone_pipeline_cams_poses_filename))):
+            print(">>> INFO: Loading scene info using Colmap from sparse directory and overwriting extrinsics stored in {args.source_path}/{args.smartphone_pipeline_cams_poses_filename}!")
             scene_info = sceneLoadTypeCallbacks["LS7HandyPipelineExtWithColmapInt"](args.source_path, args.images, args.eval, args.smartphone_pipeline_cams_poses_filename)
         elif os.path.exists(os.path.join(args.source_path, "cameras.xml")):
             print(">>> INFO: Loading scene info using CAMERAS.XML!")
