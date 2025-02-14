@@ -8,21 +8,26 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
-
+import glob
+import json
 import os
 import sys
-from PIL import Image
+import xml.etree.ElementTree as ET
+from pathlib import Path
 from typing import NamedTuple, Optional
+
+import numpy as np
+from PIL import Image
+from plyfile import PlyData, PlyElement
 from tqdm import tqdm
+
 from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec2rotmat, \
     read_extrinsics_binary, read_intrinsics_binary, read_points3D_binary, read_points3D_text
-from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
-import numpy as np
-import json
-from pathlib import Path
-from plyfile import PlyData, PlyElement
-from utils.sh_utils import SH2RGB
 from scene.gaussian_model import BasicPointCloud
+from utils.camera_utils import extract_c2w_mat_from_xml_string
+from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
+from utils.sh_utils import SH2RGB
+
 
 class CameraInfo(NamedTuple):
     uid: int
@@ -50,6 +55,111 @@ class SceneInfo(NamedTuple):
     test_meshes: dict = {}
     tgt_train_meshes: dict = {}
     tgt_test_meshes: dict = {}
+
+def getNerfppNormHylec(cam_info):
+    def get_center_and_diag(cam_centers):
+        cam_centers = np.vstack(cam_centers)
+        avg_cam_center = np.mean(cam_centers, axis=0, keepdims=True)
+        center = avg_cam_center
+        dist = np.linalg.norm(cam_centers - center, axis=0, keepdims=True)
+        diagonal = np.max(dist)
+        return center.flatten(), diagonal
+
+    cam_centers = []
+
+    for cam in cam_info:
+        cam_centers.append(cam.T)
+
+    center, diagonal = get_center_and_diag(cam_centers)
+    radius = diagonal * 1.1
+
+    translate = -center
+
+    return {"translate": translate, "radius": radius}
+
+def readSceneInfoForScannerWB(source_path, images_folder_name):
+    print(">>> Loading training cameras...")
+    train_cam_infos = readWBCamerasFromXML(source_path, images_folder_name, "cameras_train.xml")
+    print(">>> Loading validation cameras...")
+    val_cam_infos = readWBCamerasFromXML(source_path, images_folder_name, "cameras_val.xml")
+    print(">>> Loading test cameras...")
+    test_cam_infos = readWBCamerasFromXML(source_path, images_folder_name, "cameras_test.xml")
+    print(">>> Finished loading cameras!")
+
+    # todo 25.9.24: Double check if correct here
+    nerf_normalization = getNerfppNormHylec(train_cam_infos)
+
+    scene_info = SceneInfo(point_cloud=None,
+                           train_cameras=train_cam_infos,
+                           val_cameras=val_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization,
+                           ply_path=None)
+    return scene_info
+
+
+def readWBCamerasFromXML(source_path, images_folder_name, cameras_xml_file_name):
+    camsXML_path = os.path.join(source_path, cameras_xml_file_name)
+    tree = ET.parse(camsXML_path)
+    root = tree.getroot()
+    chunk = root.find("chunk")
+    # read sensors
+    # sensors_root = root.find(".//chunk[@label='Chunk 1']//sensors")  # first chunk contains sensors intrinsics
+    sensors_root = chunk.find("sensors")  # first chunk contains sensors intrinsics
+    sensors = dict()
+    for s in sensors_root.findall("sensor"):
+        sid = int(s.get("id"))
+
+        c = s.find("calibration")
+        r = c.find("resolution")
+        height = int(r.get("height"))
+        width = int(r.get("width"))
+        focal_in_pix = float(c.get("f"))
+
+        # calculate fovs from
+        fovX = focal2fov(focal_in_pix, width)
+        fovY = focal2fov(focal_in_pix, height)
+
+        sensor_info = CameraInfo(uid=sid, FovX=fovX, FovY=fovY, width=width, height=height,
+                                 R=None, T=None, image=None, image_path=None, image_name=None)
+        sensors.update({sid: sensor_info})
+    # read cameras
+    cameras_root = chunk.find("cameras")  # first chunk contains all extrinsics
+    first_frame = int(chunk.get("start_frame_idx"))
+    last_frame = int(chunk.get("end_frame_idx"))
+    cams = []
+    for c in cameras_root.findall("camera"):
+        id = int(c.get("id"))
+        sid = int(c.get("sensor_id"))
+        sensor = sensors[sid]
+
+        mat_string = c.find(".//transform").text
+        c2w = extract_c2w_mat_from_xml_string(mat_string)
+
+        # for Camera obj we need R and T of the w2c matrix
+        w2c = np.linalg.inv(c2w)
+        R = np.transpose(w2c[:3, :3])  # R is stored transposed due to 'glm' in CUDA code
+        T = w2c[:3, 3]
+
+        # bg = np.array([1, 1, 1]) if white_background else np.array([0, 0, 0])
+
+        # create a camera for each timestep
+        camera_images_folder_path = os.path.join(source_path, images_folder_name, str(id))
+        image_paths = sorted(glob.glob(os.path.join(camera_images_folder_path, "*.jpg")))
+        # Loop through all images and create a camera for each
+        for image_path in image_paths:
+            image_name = os.path.basename(image_path)
+            timestep = int(os.path.basename(image_path))  # naming convention of image is {camera_id}/{timestep}.jpg
+            # select appropriate frames
+            if (first_frame <= timestep <= last_frame):
+                image = Image.open(image_path)
+
+                cam = CameraInfo(uid=id, FovY=sensor.FovY, FovX=sensor.FovX, width=sensor.width, height=sensor.height,
+                                 R=R, T=T, image=image, image_path=image_path, image_name=image_name, timestep=timestep)
+                cams.append(cam)
+                print(f"Loaded camera {id} with frame {timestep}")
+    return cams
+
 
 def getNerfppNorm(cam_info):
     def get_center_and_diag(cam_centers):
@@ -352,6 +462,8 @@ def readDynamicNerfInfo(path, white_background, eval, extension=".png", target_p
     return scene_info
 
 sceneLoadTypeCallbacks = {
+    "ScannerWB": readSceneInfoForScannerWB,
+
     "Colmap": readColmapSceneInfo,
     "DynamicNerf" : readDynamicNerfInfo,
     "Blender" : readNerfSyntheticInfo,

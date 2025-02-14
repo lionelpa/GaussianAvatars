@@ -8,11 +8,12 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
+import string
 
-from tqdm import tqdm
-from scene.cameras import Camera
 import numpy as np
-from utils.general_utils import PILtoTorch
+from tqdm import tqdm
+
+from scene.cameras import Camera
 from utils.graphics_utils import fov2focal
 
 WARNED = False
@@ -80,3 +81,12 @@ def camera_to_JSON(id, camera : Camera):
         'fx' : fov2focal(camera.FovX, camera.width)
     }
     return camera_entry
+
+def extract_c2w_mat_from_xml_string(matrix_string: string):
+    # Convert the string into a list of floats
+    matrix_values = list(map(float, matrix_string.split()))
+
+    # Reshape the list into a 4x4 numpy array
+    c2w_mat = np.array(matrix_values).reshape(4, 4)
+
+    return c2w_mat
