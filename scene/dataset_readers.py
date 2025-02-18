@@ -56,6 +56,29 @@ class SceneInfo(NamedTuple):
     tgt_train_meshes: dict = {}
     tgt_test_meshes: dict = {}
 
+def getNerfppNorm(cam_info):
+    def get_center_and_diag(cam_centers):
+        cam_centers = np.hstack(cam_centers)
+        avg_cam_center = np.mean(cam_centers, axis=1, keepdims=True)
+        center = avg_cam_center
+        dist = np.linalg.norm(cam_centers - center, axis=0, keepdims=True)
+        diagonal = np.max(dist)
+        return center.flatten(), diagonal
+
+    cam_centers = []
+
+    for cam in cam_info:
+        W2C = getWorld2View2(cam.R, cam.T)
+        C2W = np.linalg.inv(W2C)
+        cam_centers.append(C2W[:3, 3:4])
+
+    center, diagonal = get_center_and_diag(cam_centers)
+    radius = diagonal * 1.1
+
+    translate = -center
+
+    return {"translate": translate, "radius": radius}
+
 def getNerfppNormHylec(cam_info):
     def get_center_and_diag(cam_centers):
         cam_centers = np.vstack(cam_centers)
@@ -68,7 +91,10 @@ def getNerfppNormHylec(cam_info):
     cam_centers = []
 
     for cam in cam_info:
-        cam_centers.append(cam.T)
+        # todo 17.2.25 check if correct
+        W2C = getWorld2View2(cam.R, cam.T)
+        C2W = np.linalg.inv(W2C)
+        cam_centers.append(C2W[:3, 3:4])
 
     center, diagonal = get_center_and_diag(cam_centers)
     radius = diagonal * 1.1
@@ -102,10 +128,9 @@ def readWBCamerasFromXML(source_path, images_folder_name, cameras_xml_file_name)
     camsXML_path = os.path.join(source_path, cameras_xml_file_name)
     tree = ET.parse(camsXML_path)
     root = tree.getroot()
-    chunk = root.find("chunk")
+
     # read sensors
-    # sensors_root = root.find(".//chunk[@label='Chunk 1']//sensors")  # first chunk contains sensors intrinsics
-    sensors_root = chunk.find("sensors")  # first chunk contains sensors intrinsics
+    sensors_root = root.find("sensors") # first chunk contains sensors intrinsics
     sensors = dict()
     for s in sensors_root.findall("sensor"):
         sid = int(s.get("id"))
@@ -114,7 +139,7 @@ def readWBCamerasFromXML(source_path, images_folder_name, cameras_xml_file_name)
         r = c.find("resolution")
         height = int(r.get("height"))
         width = int(r.get("width"))
-        focal_in_pix = float(c.get("f"))
+        focal_in_pix = float(c.find("f").text)
 
         # calculate fovs from
         fovX = focal2fov(focal_in_pix, width)
@@ -124,9 +149,9 @@ def readWBCamerasFromXML(source_path, images_folder_name, cameras_xml_file_name)
                                  R=None, T=None, image=None, image_path=None, image_name=None)
         sensors.update({sid: sensor_info})
     # read cameras
-    cameras_root = chunk.find("cameras")  # first chunk contains all extrinsics
-    first_frame = int(chunk.get("start_frame_idx"))
-    last_frame = int(chunk.get("end_frame_idx"))
+    cameras_root = root.find("cameras")  # first chunk contains all extrinsics
+    first_frame = int(root.find("start_frame_idx").get("value"))
+    last_frame = int(root.find("end_frame_idx").get("value"))
     cams = []
     for c in cameras_root.findall("camera"):
         id = int(c.get("id"))
@@ -145,44 +170,22 @@ def readWBCamerasFromXML(source_path, images_folder_name, cameras_xml_file_name)
 
         # create a camera for each timestep
         camera_images_folder_path = os.path.join(source_path, images_folder_name, str(id))
-        image_paths = sorted(glob.glob(os.path.join(camera_images_folder_path, "*.jpg")))
+        image_paths = sorted(glob.glob(os.path.join(camera_images_folder_path, "*.png")))
         # Loop through all images and create a camera for each
         for image_path in image_paths:
             image_name = os.path.basename(image_path)
-            timestep = int(os.path.basename(image_path))  # naming convention of image is {camera_id}/{timestep}.jpg
+            timestep = int(os.path.basename(image_path).split(".")[0])  # naming convention of image is {camera_id}/{timestep}.png
             # select appropriate frames
             if (first_frame <= timestep <= last_frame):
-                image = Image.open(image_path)
-
+                # param 'image' is None since it is loaded dynamically by the DatasetLoader in train.py
                 cam = CameraInfo(uid=id, FovY=sensor.FovY, FovX=sensor.FovX, width=sensor.width, height=sensor.height,
-                                 R=R, T=T, image=image, image_path=image_path, image_name=image_name, timestep=timestep)
+                                 R=R, T=T, image=None, image_path=image_path, image_name=image_name, timestep=timestep)
                 cams.append(cam)
-                print(f"Loaded camera {id} with frame {timestep}")
+                # print(f"Loaded camera {id} with frame {timestep}")
+
+    print(f"Loaded {len(cams)} cameras for {cameras_xml_file_name}")
     return cams
 
-
-def getNerfppNorm(cam_info):
-    def get_center_and_diag(cam_centers):
-        cam_centers = np.hstack(cam_centers)
-        avg_cam_center = np.mean(cam_centers, axis=1, keepdims=True)
-        center = avg_cam_center
-        dist = np.linalg.norm(cam_centers - center, axis=0, keepdims=True)
-        diagonal = np.max(dist)
-        return center.flatten(), diagonal
-
-    cam_centers = []
-
-    for cam in cam_info:
-        W2C = getWorld2View2(cam.R, cam.T)
-        C2W = np.linalg.inv(W2C)
-        cam_centers.append(C2W[:3, 3:4])
-
-    center, diagonal = get_center_and_diag(cam_centers)
-    radius = diagonal * 1.1
-
-    translate = -center
-
-    return {"translate": translate, "radius": radius}
 
 def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
     cam_infos = []

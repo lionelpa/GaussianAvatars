@@ -75,47 +75,15 @@ class WBGaussianModel(GaussianModel):
         diff = diff.sum(dim=-1, keepdim=True)
         return diff.mean()
 
-    def save_ply(self, path):
-        super().save_ply(path)
-
-        npz_path = Path(path).parent / "flame_param.npz"
-        flame_param = {k: v.cpu().numpy() for k, v in self.flame_param.items()}
-        np.savez(str(npz_path), **flame_param)
-
-    def load_ply(self, path, **kwargs):
-        super().load_ply(path)
-
-        if not kwargs['has_target']:
-            # When there is no target motion specified, use the finetuned FLAME parameters.
-            # This operation overwrites the FLAME parameters loaded from the dataset.
-            npz_path = Path(path).parent / "flame_param.npz"
-            flame_param = np.load(str(npz_path))
-            flame_param = {k: torch.from_numpy(v).cuda() for k, v in flame_param.items()}
-
-            self.flame_param = flame_param
-            self.num_timesteps = self.flame_param['expr'].shape[0]  # required by viewers
-
-        if 'motion_path' in kwargs and kwargs['motion_path'] is not None:
-            # When there is a motion sequence specified, load only dynamic parameters.
-            motion_path = Path(kwargs['motion_path'])
-            flame_param = np.load(str(motion_path))
-            flame_param = {k: torch.from_numpy(v).cuda() for k, v in flame_param.items() if v.dtype == np.float32}
-
-            self.flame_param['translation'] = flame_param['translation']
-            self.flame_param['rotation'] = flame_param['rotation']
-            self.flame_param['neck_pose'] = flame_param['neck_pose']
-            self.flame_param['jaw_pose'] = flame_param['jaw_pose']
-            self.flame_param['eyes_pose'] = flame_param['eyes_pose']
-            self.flame_param['expr'] = flame_param['expr']
-            self.num_timesteps = self.flame_param['expr'].shape[0]  # required by viewers
-
-        if 'disable_fid' in kwargs and len(kwargs['disable_fid']) > 0:
-            mask = (self.binding[:, None] != kwargs['disable_fid'][None, :]).all(-1)
-
-            self.binding = self.binding[mask]
-            self._xyz = self._xyz[mask]
-            self._features_dc = self._features_dc[mask]
-            self._features_rest = self._features_rest[mask]
-            self._scaling = self._scaling[mask]
-            self._rotation = self._rotation[mask]
-            self._opacity = self._opacity[mask]
+    def load_meshes(self, train_meshes, test_meshes, tgt_train_meshes, tgt_test_meshes):
+        # meshes = {**train_meshes, **test_meshes}
+        # tgt_meshes = {**tgt_train_meshes, **tgt_test_meshes}
+        # print("len(meshes):", len(meshes))
+        # print("len(tgt)   :", len(tgt_meshes))
+        # pose_meshes = meshes if len(tgt_meshes) == 0 else tgt_meshes
+        # print("len(pose)  :", len(pose_meshes))
+        
+        # self.num_timesteps = max(pose_meshes) + 1  # required by viewers and training view when evaluating test and val data
+        # print("self.num_timesteps", self.num_timesteps)
+        self.num_timesteps = 100 # randomly chosen
+        return

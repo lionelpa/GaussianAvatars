@@ -91,7 +91,7 @@ class Scene:
         # load dataset
         assert os.path.exists(args.source_path), "Source path does not exist: {}".format(args.source_path)
         if os.path.exists(args.source_path):
-            scene_info = sceneLoadTypeCallbacks["ScannerWB"](args.source_path)
+            scene_info = sceneLoadTypeCallbacks["ScannerWB"](args.source_path, args.images)
         # elif os.path.exists(os.path.join(args.source_path, "sparse")):
         #     scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval)
         # elif os.path.exists(os.path.join(args.source_path, "canonical_flame_param.npz")):

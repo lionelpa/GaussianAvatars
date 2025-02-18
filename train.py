@@ -10,6 +10,7 @@
 #
 
 import os
+import json
 import torch
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
@@ -26,6 +27,10 @@ from utils.image_utils import psnr, error_map
 from lpipsPyTorch import lpips
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
+from scene.wb_gaussian_model import WBGaussianModel
+from utils.image_utils import save_tensor_as_image
+from datetime import datetime
+
 try:
     from torch.utils.tensorboard import SummaryWriter
     TENSORBOARD_FOUND = True
@@ -36,12 +41,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     if dataset.bind_to_mesh:
-        gaussians = FlameGaussianModel(dataset.sh_degree, dataset.disable_flame_static_offset, dataset.not_finetune_flame_params)
+        gaussians = WBGaussianModel(dataset.sh_degree)
         mesh_renderer = NVDiffRenderer()
     else:
         gaussians = GaussianModel(dataset.sh_degree)
     scene = Scene(dataset, gaussians)
+    # gaussians.save_ply_for_SIBR("./output/wb_init_gaussians.ply", scene, render_debug_origin=False)
     gaussians.training_setup(opt)
+
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
@@ -54,6 +61,18 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
     loader_camera_train = DataLoader(scene.getTrainCameras(), batch_size=None, shuffle=True, num_workers=8, pin_memory=True, persistent_workers=True)
     iter_camera_train = iter(loader_camera_train)
+
+    # chosen_cams = set()
+    # training_start_time = datetime.now()
+    # for cam in tqdm(iter_camera_train, desc="Render images for cams", unit=" cams"):
+    #     if cam.colmap_id not in chosen_cams and cam.timestep == 203:
+    #         chosen_cams.add(cam.colmap_id)
+    #         gaussians.select_mesh_by_timestep(cam.timestep)
+    #         render_pkg = render(cam, gaussians, pipe, background)
+    #         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+    #         save_tensor_as_image(image, cam, -1, training_start_time)
+    # raise Exception("Finished generating test images")
+
     # viewpoint_stack = None
     ema_loss_for_log = 0.0
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
@@ -313,6 +332,25 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
             tb_writer.add_scalar('total_points', scene.gaussians.get_xyz.shape[0], iteration)
         torch.cuda.empty_cache()
 
+def save_params_to_json(lp, op, pp, args, folder, filename="params_ga.json"):
+    # Ensure the output folder exists
+    os.makedirs(folder, exist_ok=True)
+    filepath = os.path.join(folder, filename)
+
+    # Use `vars()` to get the dictionary of each parameter group
+    params_dict = {
+        "ModelParams": vars(lp.extract(args)),
+        "OptimizationParams": vars(op.extract(args)),
+        "PipelineParams": vars(pp.extract(args)),
+        "GeneralArgs": vars(args)
+    }
+
+    # Write the dictionary to a JSON file
+    with open(filepath, 'w') as f:
+        json.dump(params_dict, f, indent=4)
+
+    print(f"Parameters saved to {filepath}")
+
 if __name__ == "__main__":
     # Set up command line argument parser
     parser = ArgumentParser(description="Training script parameters")
@@ -339,10 +377,16 @@ if __name__ == "__main__":
     if len(args.checkpoint_iterations) == 0:
         args.checkpoint_iterations.extend(list(range(args.interval, args.iterations+1, args.interval)))
     
+    args.test_iterations = [1, 500, 1000, 5000, 10000, 30000] + args.test_iterations
+    args.save_iterations = [1] + args.save_iterations
+
     print("Optimizing " + args.model_path)
 
     # Initialize system state (RNG)
     safe_state(args.quiet)
+
+    # Save params as json
+    save_params_to_json(lp, op, pp, args, args.model_path, filename="params_ga.json")
 
     # Start GUI server, configure and run training
     network_gui.init(args.ip, args.port)

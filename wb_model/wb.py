@@ -5,13 +5,14 @@ import re
 import numpy as np
 import torch
 import torch.nn as nn
+from tqdm import tqdm
 
 try:
     from pytorch3d.io import load_obj
 except ImportError:
     from utils.pytorch3d_load_obj import load_obj
 
-WB_BASE_MESH_PATH = "wb_model/assets/0_head.obj"
+WB_BASE_MESH_PATH = "wb_model/assets/4_head.obj"
 WB_MESHES_PATH = "wb_model/assets/"
 WB_MESHES_NAME_FILTER_PATTERN="([0-9]+)_head\.obj"
 
@@ -87,25 +88,23 @@ class WBModel(nn.Module):
         n_meshes = len(mesh_file_names)
         n_verts = len(verts)
 
-        print(">>> Loading Meshes...")
-        meshes_verts = torch.zeros(n_meshes, n_verts, 3)
-        for mesh_file in mesh_file_names:
+        # timestep -> mesh vertices
+        self.timestep_to_mesh_dict = {}
+        for mesh_file in tqdm(sorted(mesh_file_names, key= lambda x: int(x.split("_head.")[0])), desc="Loading meshes", unit=" objs"):
             full_path = os.path.join(wb_meshes_path, mesh_file)
 
             match = pattern.match(mesh_file)
             timestep = int(match.group(1)) if match else None
 
             verts, _, _ = load_obj(full_path, load_textures=False)
-            meshes_verts[timestep] = verts
-            print(f"Successfully loaded mesh {mesh_file}")
-        self.register_buffer("meshes_verts", meshes_verts, persistent=False)
+            # move all mesh vert tensors to gpu
+            self.timestep_to_mesh_dict[timestep] = verts.unsqueeze(0).float().cuda()
 
-        self.register_buffer("textures_idx", faces.textures_idx, persistent=False)
+        # self.register_buffer("textures_idx", faces.textures_idx, persistent=False)
         # Check our template mesh faces match those of FLAME:
-        assert (self.faces == torch.from_numpy(flame_model.f.astype('int64'))).all()
 
     def forward(self, timestep):
-        return self.meshes_verts[timestep]
+        return self.timestep_to_mesh_dict[timestep]
 
 
 class BufferContainer(nn.Module):
@@ -130,4 +129,4 @@ class BufferContainer(nn.Module):
 
 
 if __name__ == '__main__':
-    flame_model = WBModel()
+    wb_model = WBModel()
