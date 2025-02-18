@@ -25,6 +25,7 @@ from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec
     read_extrinsics_binary, read_intrinsics_binary, read_points3D_binary, read_points3D_text
 from scene.gaussian_model import BasicPointCloud
 from utils.camera_utils import extract_c2w_mat_from_xml_string
+from utils.general_utils import save_as_ply
 from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
 from utils.sh_utils import SH2RGB
 
@@ -81,8 +82,9 @@ def getNerfppNorm(cam_info):
 
 def getNerfppNormHylec(cam_info):
     def get_center_and_diag(cam_centers):
-        cam_centers = np.vstack(cam_centers)
-        avg_cam_center = np.mean(cam_centers, axis=0, keepdims=True)
+        cam_centers = np.hstack(cam_centers)
+        avg_cam_center = np.mean(cam_centers, axis=1, keepdims=True)
+
         center = avg_cam_center
         dist = np.linalg.norm(cam_centers - center, axis=0, keepdims=True)
         diagonal = np.max(dist)
@@ -97,10 +99,10 @@ def getNerfppNormHylec(cam_info):
         cam_centers.append(C2W[:3, 3:4])
 
     center, diagonal = get_center_and_diag(cam_centers)
+    save_as_ply(np.hstack(cam_centers).transpose(), np.array([center]), path="./output/_plys/PPNormHylec.ply")
     radius = diagonal * 1.1
 
     translate = -center
-
     return {"translate": translate, "radius": radius}
 
 def readSceneInfoForScannerWB(source_path, images_folder_name):

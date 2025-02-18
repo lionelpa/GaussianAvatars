@@ -14,6 +14,9 @@ import sys
 from datetime import datetime
 import numpy as np
 import random
+import os
+from utils.system_utils import mkdir_p
+from plyfile import PlyData, PlyElement
 
 def inverse_sigmoid(x):
     return torch.log(x/(1-x))
@@ -131,3 +134,68 @@ def safe_state(silent):
     np.random.seed(0)
     torch.manual_seed(0)
     torch.cuda.set_device(torch.device("cuda:0"))
+
+def save_as_ply(points, center, path, render_debug_origin=False):
+        print("Saving initial gaussians as ply...")
+        
+        mkdir_p(os.path.dirname(path))
+
+        # Read point cloud
+        ## global XYZ
+        xyz = points
+        xyz = np.vstack([xyz, center])
+        normals = np.zeros_like(xyz)
+        ## color in feature_dc is between 0 and 1. It needs to be mult by 255 and saved in .ply as uint8 (which is uchar) to 
+        ## be a read correctly by e.g. meshlab
+
+        color = np.zeros_like(xyz)
+        color[:,1] = 255 #red points
+        color[-1,1] = 255 #green center
+
+
+        print("points", points.shape)
+        print("center", center.shape)
+        print("xyz   ", xyz.shape)
+        print("color ", color.shape)
+
+        if render_debug_origin:
+            cyan = [0, 255, 255]
+            yellow = [255, 255, 0]
+            magenta = [255, 0, 255]
+
+            step_size = 0.05
+            for i in range(0, 20):
+                # right (x)
+                step = np.array([step_size * i, 0, 0])
+                xyz = np.vstack([xyz, step])
+                color = np.vstack([color, magenta])
+                normals = np.vstack([normals, [0, 0, 0]])
+
+                # up (y)
+                step = np.array([0, step_size * i, 0])
+                xyz = np.vstack([xyz, step])
+                color = np.vstack([color, cyan])
+                normals = np.vstack([normals, [0, 0, 0]])
+
+                # forward (z)
+                step = np.array([0, 0, step_size * i])
+                xyz = np.vstack([xyz, step])
+                color = np.vstack([color, yellow])
+                normals = np.vstack([normals, [0, 0, 0]])
+
+        # print(xyz.shape)
+        # print(normals.shape)
+        # print(color.shape, color.dtype, color[0,:])
+
+        dtype_full = [
+            ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),  # XYZ coordinates
+            ('nx', 'f4'), ('ny', 'f4'), ('nz', 'f4'),  # Normals (set to zero)
+            ('red', 'uint8'), ('green', 'uint8'), ('blue', 'uint8')  # Color channels
+        ]
+
+        elements = np.empty(xyz.shape[0], dtype=dtype_full)
+        attributes = np.concatenate((xyz, normals, color), axis=1)
+
+        elements[:] = list(map(tuple, attributes))
+        el = PlyElement.describe(elements, 'vertex')
+        PlyData([el]).write(path)
