@@ -129,8 +129,12 @@ def compute_face_orientation(verts, faces, return_scale=False):
     orientation = torch.cat([a0[..., None], a1[..., None], a2[..., None]], dim=-1)
 
     if return_scale:
+        # length of one side of each triangle
+        # dim (n_faces x 1)
         s0 = length(v1 - v0)
+        # gets the height of the triangle
         s1 = dot(a2, (v2 - v0)).abs()
+        # more robust on extreme triangle shapes than actualy surface area
         scale = (s0 + s1) / 2
     return orientation, scale
 

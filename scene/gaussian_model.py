@@ -536,20 +536,6 @@ class GaussianModel:
         ## be a read correctly by e.g. meshlab
         color = self._features_dc.detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()*255
 
-        # For debug append camera data for visualization
-        ## append cam data
-        cam_color = {
-            "A": [255, 0, 0],
-            "B": [255, 255, 255],
-            "C": [255, 255, 255],
-            "D": [0, 0, 255],
-            "E": [0, 0, 255],
-            "F": [255, 255, 255],
-            "G": [255, 255, 255],
-            "H": [255, 0, 0],
-            "T": [255, 255, 255]
-        }
-
         # # For debug append camera data for visualization
         # ## center cage
         # ground_cams = [c for c in cameras if c.image_name[-1] == "1" and c.image_name[0] != "T"]
