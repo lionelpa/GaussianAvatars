@@ -65,8 +65,9 @@ class WBModel(nn.Module):
             # move all mesh vert tensors to gpu
             self.timestep_to_mesh_dict[t] = full_verts.unsqueeze(0).float().cuda()
 
-        # self.register_buffer("textures_idx", faces.textures_idx, persistent=False)
-        # Check our template mesh faces match those of FLAME:
+        self.num_timesteps = len(self.timestep_to_mesh_dict.values())
+        self.start_timestep = min(self.timestep_to_mesh_dict.keys())
+        self.end_timestep = max(self.timestep_to_mesh_dict.keys())
 
     def load_timestep2mesh_dict(self, meshes_path, pattern, unit=""):
         mesh_dict = {}

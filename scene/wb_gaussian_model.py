@@ -6,15 +6,10 @@
 # is strictly prohibited.
 #
 
-from pathlib import Path
-
-import numpy as np
 import torch
-# from pytorch3d.transforms import matrix_to_quaternion
 from roma import rotmat_to_unitquat, quat_xyzw_to_wxyz
 
 from utils.graphics_utils import compute_face_orientation
-# from vht.model.flame import FlameHead
 from wb_model.wb import WBModel
 from .gaussian_model import GaussianModel
 
@@ -24,6 +19,10 @@ class WBGaussianModel(GaussianModel):
         super().__init__(sh_degree)
 
         self.wb_model = WBModel().cuda()
+        self.num_timesteps = self.wb_model.num_timesteps
+        self.min_timestep = self.wb_model.start_timestep
+        self.max_timestep = self.wb_model.end_timestep
+
 
         # binding is initialized once the mesh topology is known
         if self.binding is None:
@@ -85,5 +84,4 @@ class WBGaussianModel(GaussianModel):
         
         # self.num_timesteps = max(pose_meshes) + 1  # required by viewers and training view when evaluating test and val data
         # print("self.num_timesteps", self.num_timesteps)
-        self.num_timesteps = 100 # randomly chosen
         return
