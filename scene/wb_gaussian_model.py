@@ -23,6 +23,12 @@ class WBGaussianModel(GaussianModel):
         self.min_timestep = self.wb_model.start_timestep
         self.max_timestep = self.wb_model.end_timestep
 
+        self.verts = list(self.wb_model.timestep_to_mesh_dict.values())[0]
+        self.verts_uvs = self.wb_model.verts_uvs
+        self.faces = self.wb_model.faces
+        self.faces_uvs = self.wb_model.faces_uvs
+        self.texture = self.wb_model.texture
+
 
         # binding is initialized once the mesh topology is known
         if self.binding is None:

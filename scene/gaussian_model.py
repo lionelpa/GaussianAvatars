@@ -175,7 +175,8 @@ class GaussianModel:
             assert self.binding is not None
             num_pts = self.binding.shape[0]
             fused_point_cloud = torch.zeros((num_pts, 3)).float().cuda()
-            fused_color = torch.tensor(np.random.random((num_pts, 3)) / 255.0).float().cuda()
+            # fused_color = torch.tensor(np.random.random((num_pts, 3)) / 255.0).float().cuda()
+            fused_color = torch.tensor(self.calc_init_tri_color()).float().cuda()
         else:
             fused_point_cloud = torch.tensor(np.asarray(pcd.points)).float().cuda()
             fused_color = RGB2SH(torch.tensor(np.asarray(pcd.colors)).float().cuda())
@@ -617,3 +618,29 @@ class GaussianModel:
         elements[:] = list(map(tuple, attributes))
         el = PlyElement.describe(elements, 'vertex')
         PlyData([el]).write(path)
+    
+    def calc_init_tri_color(self):
+        triangle_colors = []
+        for face, face_uv in zip(self.faces, self.faces_uvs):  # Zip for consistent UV mapping
+            uv1, uv2, uv3 = self.verts_uvs[face_uv[0]], self.verts_uvs[face_uv[1]], self.verts_uvs[face_uv[2]]
+
+            # average uvs
+            uv_center = (uv1 + uv2 + uv3) / 3
+            u, v = uv_center
+
+            # get pixel pos
+            tex_x = int((u) * (self.texture.shape[1] - 1))
+            tex_y = int((1-v) * (self.texture.shape[0] - 1))  # y is flipped
+
+            # Ensure tex_x and tex_y stay within bounds
+            tex_x = np.clip(tex_x, 0, self.texture.shape[1] - 1)
+            tex_y = np.clip(tex_y, 0, self.texture.shape[0] - 1)
+            # color at the texture coordinates
+            # texture is accessed using x=lineindex, y=colindex
+            # discard alpha
+            # values in [0,255]
+            color = self.texture[tex_y, tex_x][:3]
+
+            triangle_colors.append(color)
+
+        return np.array(triangle_colors) / 255.0

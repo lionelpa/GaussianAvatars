@@ -99,7 +99,7 @@ def getNerfppNormHylec(cam_info):
         cam_centers.append(C2W[:3, 3:4])
 
     center, diagonal = get_center_and_diag(cam_centers)
-    save_as_ply(np.hstack(cam_centers).transpose(), np.array([center]), path="./output/_plys/PPNormHylec.ply")
+    # save_as_ply(np.hstack(cam_centers).transpose(), np.array([center]), path="./output/_plys/PPNormHylec.ply")
     radius = diagonal * 1.1
 
     translate = -center

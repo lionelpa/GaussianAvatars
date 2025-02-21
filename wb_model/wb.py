@@ -6,24 +6,31 @@ import numpy as np
 import torch
 import torch.nn as nn
 from tqdm import tqdm
+from PIL import Image
 
 try:
     from pytorch3d.io import load_obj
 except ImportError:
     from utils.pytorch3d_load_obj import load_obj
 
-WB_HEAD_BASE_MESH_PATH = "wb_model/assets/4_head.obj"
-WB_EYES_BASE_MESH_PATH = "wb_model/assets/4_eyes.obj"
+WB_HEAD_BASE_MESH_PATH = "wb_model/assets/0_head_foundational.obj"
+WB_EYES_BASE_MESH_PATH = "wb_model/assets/0_eyes_foundational.obj"
 WB_MESHES_PATH = "wb_model/assets/"
 WB_HEAD_MESHES_NAME_FILTER_PATTERN="([0-9]+)_head\.obj"
 WB_EYES_MESHES_NAME_FILTER_PATTERN="([0-9]+)_eyes\.obj"
+WB_TEXTURE_PATH = "wb_model/assets/skin_basecolor.png"
 
+
+def load_texture(texture_path):
+    texture = Image.open(texture_path)
+    texture.convert('RGB')
+    texture_np = np.array(texture)
+
+    return texture_np
 
 class WBModel(nn.Module):
-    """
-    Given flame parameters this class generates a differentiable FLAME function
-    which outputs the a mesh and 2D/3D facial landmarks
-    """
+
+
 
     def __init__(
             self,
@@ -32,6 +39,7 @@ class WBModel(nn.Module):
             wb_meshes_path=WB_MESHES_PATH,
             wb_head_meshes_name_filter_pattern=WB_HEAD_MESHES_NAME_FILTER_PATTERN,
             wb_eyes_meshes_name_filter_pattern=WB_EYES_MESHES_NAME_FILTER_PATTERN,
+            wb_texture_path=WB_TEXTURE_PATH
     ):
         """
         Initializes the class with paths and filters for loading meshes.
@@ -44,12 +52,18 @@ class WBModel(nn.Module):
         super(WBModel, self).__init__()
 
         # Get face info from base meshes. Faces do not change throughout training and can be buffered
-        head_verts, head_faces, _ = load_obj(wb_head_base_mesh_path, load_textures=False)
-        _, eyes_faces, _ = load_obj(wb_eyes_base_mesh_path, load_textures=False)
-        
+        head_verts, head_faces, head_aux = load_obj(wb_head_base_mesh_path, load_textures=False)
+        _, eyes_faces, eyes_aux = load_obj(wb_eyes_base_mesh_path, load_textures=False)        
+
         # stack eyes faces under head faces and adjust indices
         faces = torch.vstack((head_faces.verts_idx, eyes_faces.verts_idx + head_verts.shape[0]))
         self.register_buffer("faces", faces, persistent=False)
+
+        self.texture = load_texture(wb_texture_path)
+
+        self.verts_uvs = torch.vstack((head_aux.verts_uvs, eyes_aux.verts_uvs))
+        self.faces_uvs = torch.vstack((head_faces.textures_idx, eyes_faces.textures_idx))
+
 
         # Load each head.obj 
         head_file_pattern = re.compile(wb_head_meshes_name_filter_pattern)

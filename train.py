@@ -46,7 +46,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     else:
         gaussians = GaussianModel(dataset.sh_degree)
     scene = Scene(dataset, gaussians)
-    gaussians.save_ply_for_SIBR("./output/wb_init_gaussians.ply", scene, render_debug_origin=True)
+    gaussians.save_ply_for_SIBR(f"{dataset.model_path}/_init_gaussians.ply", scene, render_debug_origin=True)
     gaussians.training_setup(opt)
 
     if checkpoint:
