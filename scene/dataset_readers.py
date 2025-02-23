@@ -74,6 +74,7 @@ def getNerfppNorm(cam_info):
         cam_centers.append(C2W[:3, 3:4])
 
     center, diagonal = get_center_and_diag(cam_centers)
+    save_as_ply(np.hstack(cam_centers).transpose(), np.array([center]), path="./output/_plys/PPNorm.ply")
     radius = diagonal * 1.1
 
     translate = -center
@@ -106,12 +107,19 @@ def getNerfppNormHylec(cam_info):
     return {"translate": translate, "radius": radius}
 
 def readSceneInfoForScannerWB(source_path, images_folder_name):
+    try:
+        cameras_intrinsic_file = os.path.join(source_path, "sparse/0", "cameras.bin")
+        cam_intrinsics = read_intrinsics_binary(cameras_intrinsic_file)
+    except:
+        cameras_intrinsic_file = os.path.join(source_path, "sparse/0", "cameras.txt")
+        cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
+
     print(">>> Loading training cameras...")
-    train_cam_infos = readWBCamerasFromXML(source_path, images_folder_name, "cameras_train.xml")
+    train_cam_infos = readWBCamerasFromXML(source_path, images_folder_name, cam_intrinsics, "cameras_train.xml")
     print(">>> Loading validation cameras...")
-    val_cam_infos = readWBCamerasFromXML(source_path, images_folder_name, "cameras_val.xml")
+    val_cam_infos = readWBCamerasFromXML(source_path, images_folder_name, cam_intrinsics, "cameras_val.xml")
     print(">>> Loading test cameras...")
-    test_cam_infos = readWBCamerasFromXML(source_path, images_folder_name, "cameras_test.xml")
+    test_cam_infos = readWBCamerasFromXML(source_path, images_folder_name, cam_intrinsics, "cameras_test.xml")
     print(">>> Finished loading cameras!")
 
     # todo 25.9.24: Double check if correct here
@@ -126,7 +134,7 @@ def readSceneInfoForScannerWB(source_path, images_folder_name):
     return scene_info
 
 
-def readWBCamerasFromXML(source_path, images_folder_name, cameras_xml_file_name):
+def readWBCamerasFromXML(source_path, images_folder_name, colmap_intrinsics, cameras_xml_file_name):
     camsXML_path = os.path.join(source_path, cameras_xml_file_name)
     tree = ET.parse(camsXML_path)
     root = tree.getroot()
@@ -141,11 +149,25 @@ def readWBCamerasFromXML(source_path, images_folder_name, cameras_xml_file_name)
         r = c.find("resolution")
         height = int(r.get("height"))
         width = int(r.get("width"))
-        focal_in_pix = float(c.find("f").text)
+        # focal_in_pix = float(c.find("f").text)
+        #
+        # # calculate fovs from
+        # fovX = focal2fov(focal_in_pix, width)
+        # fovY = focal2fov(focal_in_pix, height)
 
-        # calculate fovs from
-        fovX = focal2fov(focal_in_pix, width)
-        fovY = focal2fov(focal_in_pix, height)
+        # overwrite intrinsics with colmap data
+        intr = colmap_intrinsics[sid+1]
+        if intr.model=="SIMPLE_PINHOLE":
+            focal_length_x = intr.params[0]
+            fovY = focal2fov(focal_length_x, height)
+            fovX = focal2fov(focal_length_x, width)
+        elif intr.model=="PINHOLE":
+            focal_length_x = intr.params[0]
+            focal_length_y = intr.params[1]
+            fovY = focal2fov(focal_length_y, height)
+            fovX = focal2fov(focal_length_x, width)
+        else:
+            raise Exception("Unknown camera model")
 
         sensor_info = CameraInfo(uid=sid, FovX=fovX, FovY=fovY, width=width, height=height,
                                  R=None, T=None, image=None, image_path=None, image_name=None)
