@@ -147,31 +147,51 @@ def readWBCamerasFromXML(source_path, images_folder_name, colmap_intrinsics, cam
 
         c = s.find("calibration")
         r = c.find("resolution")
-        height = int(r.get("height"))
-        width = int(r.get("width"))
-        # focal_in_pix = float(c.find("f").text)
-        #
+
         # # calculate fovs from
-        # fovX = focal2fov(focal_in_pix, width)
-        # fovY = focal2fov(focal_in_pix, height)
+        height_meta = int(r.get("height"))
+        width_meta = int(r.get("width"))
+        focal_in_pix = float(c.find("f").text)
+        fovX_meta = focal2fov(focal_in_pix, width_meta)
+        fovY_meta = focal2fov(focal_in_pix, height_meta)
+        
 
-        # overwrite intrinsics with colmap data
-        intr = colmap_intrinsics[sid+1]
-        if intr.model=="SIMPLE_PINHOLE":
-            focal_length_x = intr.params[0]
-            fovY = focal2fov(focal_length_x, height)
-            fovX = focal2fov(focal_length_x, width)
-        elif intr.model=="PINHOLE":
-            focal_length_x = intr.params[0]
-            focal_length_y = intr.params[1]
-            fovY = focal2fov(focal_length_y, height)
-            fovX = focal2fov(focal_length_x, width)
-        else:
-            raise Exception("Unknown camera model")
+        for col_cam_uid, intr in colmap_intrinsics.items():
+            # overwrite intrinsics with colmap data
+            # intr = colmap_intrinsics[sid+1]
+            # use actualy height and width of colmap
+            height = intr.height
+            width = intr.width
 
-        sensor_info = CameraInfo(uid=sid, FovX=fovX, FovY=fovY, width=width, height=height,
-                                 R=None, T=None, image=None, image_path=None, image_name=None)
-        sensors.update({sid: sensor_info})
+            if intr.model=="SIMPLE_PINHOLE":
+                focal_length_x = intr.params[0]
+                fovY = focal2fov(focal_length_x, height)
+                fovX = focal2fov(focal_length_x, width)
+            elif intr.model=="PINHOLE":
+                focal_length_x = intr.params[0]
+                focal_length_y = intr.params[1]
+                fovY = focal2fov(focal_length_y, height)
+                fovX = focal2fov(focal_length_x, width)
+            else:
+                raise Exception("Unknown camera model")
+            
+            if (col_cam_uid-1) not in sensors.keys():
+                print(f">>>>>>>>> Sensor {sid} COLMAP {col_cam_uid}")
+                print(f"height {height_meta} -> {height}")
+                print(f"width {width_meta} -> {width}")
+                print(f"focal_length_x {focal_in_pix} -> {focal_length_x}")
+                print(f"focal_length_y {''} -> {focal_length_y if focal_length_y else ''}")
+                print(f"fovX {fovX_meta} -> {fovX}")
+                print(f"fovY {fovY_meta} -> {fovY}")
+                print("=" * 30)
+            else:
+                print(f"!!! {col_cam_uid} already added")
+
+            # uid-1 since colmap start numbering at 1
+            sensor_info = CameraInfo(uid=col_cam_uid-1, FovX=fovX, FovY=fovY, width=width, height=height,
+                                    R=None, T=None, image=None, image_path=None, image_name=None)
+            sensors.update({col_cam_uid-1: sensor_info})
+    print("NUMBER OF SENSORS:", len(sensors.items()))
     # read cameras
     cameras_root = root.find("cameras")  # first chunk contains all extrinsics
     first_frame = int(root.find("start_frame_idx").get("value"))
@@ -179,8 +199,8 @@ def readWBCamerasFromXML(source_path, images_folder_name, colmap_intrinsics, cam
     cams = []
     for c in cameras_root.findall("camera"):
         id = int(c.get("id"))
-        sid = int(c.get("sensor_id"))
-        sensor = sensors[sid]
+        # sid = int(c.get("sensor_id"))
+        sensor = sensors[id]
 
         mat_string = c.find(".//transform").text
         c2w = extract_c2w_mat_from_xml_string(mat_string)

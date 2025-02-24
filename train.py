@@ -378,7 +378,7 @@ if __name__ == "__main__":
         args.checkpoint_iterations.extend(list(range(args.interval, args.iterations+1, args.interval)))
     
     args.test_iterations = [1, 500, 1000, 5000, 10000, 30000] + args.test_iterations
-    args.save_iterations = [1] + args.save_iterations
+    args.save_iterations = [1, 30000] + args.save_iterations
 
     print("Optimizing " + args.model_path)
 
