@@ -189,3 +189,41 @@ def save_as_ply(points, center, path, render_debug_origin=False):
         elements[:] = list(map(tuple, attributes))
         el = PlyElement.describe(elements, 'vertex')
         PlyData([el]).write(path)
+
+def compute_face_areas(verts, faces):
+    """Compute the areas of all triangles in a mesh."""
+    # Get the 3 vertices per face
+    print(">> verts", verts.shape)
+    print(">> faces", faces.shape)
+
+    v0 = verts[faces[:, 0]]
+    v1 = verts[faces[:, 1]]
+    v2 = verts[faces[:, 2]]
+
+    # Compute edge vectors
+    e1 = v1 - v0
+    e2 = v2 - v0
+
+    # Compute cross product and area (0.5 * ||cross product||)
+    cross_prod = torch.cross(e1, e2, dim=1)
+    areas = 0.5 * torch.norm(cross_prod, dim=1)
+
+    return areas
+
+def get_statistics(areas):
+    return {
+        "# Faces": areas.shape[0],
+        "Min Area": areas.min().item(),
+        "Max Area": areas.max().item(),
+        "Mean Area": areas.mean().item(),
+        "Median Area": areas.median().item(),
+        "Std Deviation": areas.std().item()
+    }
+
+def print_triangle_area_info(verts, faces):
+    areas = compute_face_areas(verts, faces)
+    statistics = get_statistics(areas)
+    print("============ STATISTICS ============")
+    for k,v in statistics.items():
+        print(f"{k}: {v}")
+    print("====================================")

@@ -15,10 +15,10 @@ from .gaussian_model import GaussianModel
 
 
 class WBGaussianModel(GaussianModel):
-    def __init__(self, sh_degree: int):
+    def __init__(self, center_and_scale ,sh_degree: int):
         super().__init__(sh_degree)
 
-        self.wb_model = WBModel().cuda()
+        self.wb_model = WBModel(center_and_scale).cuda()
         self.num_timesteps = self.wb_model.num_timesteps
         self.min_timestep = self.wb_model.start_timestep
         self.max_timestep = self.wb_model.end_timestep
@@ -28,6 +28,9 @@ class WBGaussianModel(GaussianModel):
         self.faces = self.wb_model.faces
         self.faces_uvs = self.wb_model.faces_uvs
         self.texture = self.wb_model.texture
+
+        self.raw_mesh_centroid = self.wb_model.raw_mesh_centroid
+        self.rescale_factor = self.wb_model.rescale_factor
 
 
         # binding is initialized once the mesh topology is known

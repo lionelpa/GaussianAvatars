@@ -37,11 +37,11 @@ try:
 except ImportError:
     TENSORBOARD_FOUND = False
 
-def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
+def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, center_and_scale):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     if dataset.bind_to_mesh:
-        gaussians = WBGaussianModel(dataset.sh_degree)
+        gaussians = WBGaussianModel(center_and_scale, dataset.sh_degree)
         mesh_renderer = NVDiffRenderer()
     else:
         gaussians = GaussianModel(dataset.sh_degree)
@@ -367,7 +367,10 @@ if __name__ == "__main__":
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
+    parser.add_argument("-cs", "--center_and_scale", action="store_true", default=False, help="Enable centering and scaling of wb mesh to approximate flame setup")
     args = parser.parse_args(sys.argv[1:])
+    if not args.center_and_scale:
+        raise Exception("Centering and rescaling should be on!")
     if args.interval > op.iterations:
         args.interval = op.iterations // 5
     if len(args.test_iterations) == 0:
@@ -391,7 +394,16 @@ if __name__ == "__main__":
     # Start GUI server, configure and run training
     network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
+    training(
+        lp.extract(args), 
+        op.extract(args), 
+        pp.extract(args), 
+        args.test_iterations, 
+        args.save_iterations, 
+        args.checkpoint_iterations, 
+        args.start_checkpoint, 
+        args.debug_from,
+        args.center_and_scale)
 
     # All done
     print("\nTraining complete.")

@@ -47,7 +47,8 @@ def loadCam(args, id, cam_info, resolution_scale):
                   image=cam_info.image, 
                   image_path=cam_info.image_path,
                   image_name=cam_info.image_name, uid=id, 
-                  timestep=cam_info.timestep, data_device=args.data_device)
+                  timestep=cam_info.timestep, data_device=args.data_device,
+                  trans=cam_info.trans, scale=cam_info.scale)
 
 def cameraList_from_camInfos(cam_infos, resolution_scale, args):
     camera_list = []

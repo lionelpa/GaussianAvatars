@@ -44,6 +44,8 @@ class CameraInfo(NamedTuple):
     bg: np.array = np.array([0, 0, 0])
     timestep: Optional[int] = None
     camera_id: Optional[int] = None
+    trans: np.array = np.array([0, 0, 0])
+    scale: int = 1
 
 class SceneInfo(NamedTuple):
     train_cameras: list
@@ -105,13 +107,13 @@ def getNerfppNormHylec(cam_info):
     translate = -center
     return {"translate": translate, "radius": radius}
 
-def readSceneInfoForScannerWB(source_path, images_folder_name):
+def readSceneInfoForScannerWB(source_path, images_folder_name, centroid, rescale_factor):
     print(">>> Loading training cameras...")
-    train_cam_infos = readWBCamerasFromXML(source_path, images_folder_name, "cameras_train.xml")
+    train_cam_infos = readWBCamerasFromXML(source_path, images_folder_name, "cameras_train.xml", centroid, rescale_factor)
     print(">>> Loading validation cameras...")
-    val_cam_infos = readWBCamerasFromXML(source_path, images_folder_name, "cameras_val.xml")
+    val_cam_infos = readWBCamerasFromXML(source_path, images_folder_name, "cameras_val.xml", centroid, rescale_factor)
     print(">>> Loading test cameras...")
-    test_cam_infos = readWBCamerasFromXML(source_path, images_folder_name, "cameras_test.xml")
+    test_cam_infos = readWBCamerasFromXML(source_path, images_folder_name, "cameras_test.xml", centroid, rescale_factor)
     print(">>> Finished loading cameras!")
 
     # todo 25.9.24: Double check if correct here
@@ -126,7 +128,7 @@ def readSceneInfoForScannerWB(source_path, images_folder_name):
     return scene_info
 
 
-def readWBCamerasFromXML(source_path, images_folder_name, cameras_xml_file_name):
+def readWBCamerasFromXML(source_path, images_folder_name, cameras_xml_file_name, centroid, rescale_factor):
     camsXML_path = os.path.join(source_path, cameras_xml_file_name)
     tree = ET.parse(camsXML_path)
     root = tree.getroot()
@@ -165,7 +167,13 @@ def readWBCamerasFromXML(source_path, images_folder_name, cameras_xml_file_name)
 
         # for Camera obj we need R and T of the w2c matrix
         w2c = np.linalg.inv(c2w)
-        R = np.transpose(w2c[:3, :3])  # R is stored transposed due to 'glm' in CUDA code
+        R = np.transpose(w2c[:3, :3])   # R is stored transposed due to 'glm' in CUDA code
+        # print("WOW")
+        # print(w2c[:3, 3])
+        # print(centroid.numpy())
+        # print((w2c[:3, 3] - centroid.numpy()))
+        # print((w2c[:3, 3] - centroid.numpy()) * rescale_factor)
+        
         T = w2c[:3, 3]
 
         # bg = np.array([1, 1, 1]) if white_background else np.array([0, 0, 0])
@@ -181,7 +189,8 @@ def readWBCamerasFromXML(source_path, images_folder_name, cameras_xml_file_name)
             if (first_frame <= timestep <= last_frame):
                 # param 'image' is None since it is loaded dynamically by the DatasetLoader in train.py
                 cam = CameraInfo(uid=id, FovY=sensor.FovY, FovX=sensor.FovX, width=sensor.width, height=sensor.height,
-                                 R=R, T=T, image=None, image_path=image_path, image_name=image_name, timestep=timestep)
+                                 R=R, T=T, image=None, image_path=image_path, image_name=image_name, timestep=timestep,
+                                 trans=-centroid.numpy(), scale=rescale_factor)
                 cams.append(cam)
                 # print(f"Loaded camera {id} with frame {timestep}")
 
