@@ -10,6 +10,7 @@
 #
 import glob
 import json
+import math
 import os
 import sys
 import xml.etree.ElementTree as ET
@@ -25,27 +26,44 @@ from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec
     read_extrinsics_binary, read_intrinsics_binary, read_points3D_binary, read_points3D_text
 from scene.gaussian_model import BasicPointCloud
 from utils.camera_utils import extract_c2w_mat_from_xml_string
-from utils.general_utils import save_as_ply
 from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
 from utils.sh_utils import SH2RGB
 
 
+class SensorInfo(NamedTuple):
+    # intrinsics
+    width : int
+    height: int
+    fl_x  : float
+    fl_y  : float
+    cx    : float
+    cy    : float
+    k1    : float
+    k2    : float
+    k3    : float
+    p1    : float
+    p2    : float
+    fovX  : np.array
+    fovY  : np.array
+
 class CameraInfo(NamedTuple):
     uid: int
+
+    # extrinsics
     R: np.array
     T: np.array
-    FovY: np.array
-    FovX: np.array
+
+    # intrinsics
+    sensor_info: SensorInfo
+
     image: Optional[np.array]
     image_path: str
     image_name: str
-    width: int
-    height: int
-    bg: np.array = np.array([0, 0, 0])
     timestep: Optional[int] = None
     camera_id: Optional[int] = None
     trans: np.array = np.array([0, 0, 0])
     scale: int = 1
+    bg: np.array = np.array([0, 0, 0])
 
 class SceneInfo(NamedTuple):
     train_cameras: list
@@ -127,72 +145,86 @@ def readSceneInfoForScannerWB(source_path, images_folder_name, centroid, rescale
                            ply_path=None)
     return scene_info
 
+###############################################################################
+# START
+# original code taken from https://github.com/EnricoAhlers/agi2nerf/blob/main/agi2nerf.py
+#Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
+
+def get_calibration(root):
+    for sensor in root[0]:
+        for child in sensor:
+            print(child.tag)
+            if child.tag == "calibration":
+                return child
+    print("No calibration found")
+    return None
+
+def get_sensor_info(root):
+    w = int(root[0][0][0].get("width"))
+    h = int(root[0][0][0].get("height"))
+    calibration = get_calibration(root)
+    fl_x = float(calibration[1].text)
+    fl_y = fl_x
+    cx = float(calibration[2].text) + w / 2
+    cy = float(calibration[3].text) + h / 2
+    k1 = float(calibration[4].text)
+    k2 = float(calibration[5].text)
+    k3 = float(calibration[6].text)  # missing in original
+    p1 = float(calibration[7].text)
+    p2 = float(calibration[8].text)
+    fovX = math.atan(float(w) / (float(fl_x) * 2)) * 2
+    fovY = math.atan(float(h) / (float(fl_y) * 2)) * 2
+
+    return SensorInfo(w,h,fl_x,fl_y,cx,cy,k1,k2,k3,p1,p2,fovX,fovY)
 
 def readWBCamerasFromXML(source_path, images_folder_name, cameras_xml_file_name, centroid, rescale_factor):
     camsXML_path = os.path.join(source_path, cameras_xml_file_name)
-    tree = ET.parse(camsXML_path)
-    root = tree.getroot()
 
-    # read sensors
-    sensors_root = root.find("sensors") # first chunk contains sensors intrinsics
-    sensors = dict()
-    for s in sensors_root.findall("sensor"):
-        sid = int(s.get("id"))
+    with open(camsXML_path, "r") as f:
+        root = ET.parse(f).getroot()
+        sensor_info = get_sensor_info(root)
 
-        c = s.find("calibration")
-        r = c.find("resolution")
-        height = int(r.get("height"))
-        width = int(r.get("width"))
-        focal_in_pix = float(c.find("f").text)
+        ###############################################################################
+        # END
+        # Copyright (C) 2022, Enrico Philip Ahlers. All rights reserved.
 
-        # calculate fovs from
-        fovX = focal2fov(focal_in_pix, width)
-        fovY = focal2fov(focal_in_pix, height)
+        # read cameras
+        cameras_root = root.find("cameras")  # first chunk contains all extrinsics
+        first_frame = int(root.find("start_frame_idx").get("value"))
+        last_frame = int(root.find("end_frame_idx").get("value"))
+        cams = []
+        for c in cameras_root.findall("camera"):
+            id = int(c.get("id"))
+            # sid = int(c.get("sensor_id"))
+            # sensor = sensors[sid]
 
-        sensor_info = CameraInfo(uid=sid, FovX=fovX, FovY=fovY, width=width, height=height,
-                                 R=None, T=None, image=None, image_path=None, image_name=None)
-        sensors.update({sid: sensor_info})
-    # read cameras
-    cameras_root = root.find("cameras")  # first chunk contains all extrinsics
-    first_frame = int(root.find("start_frame_idx").get("value"))
-    last_frame = int(root.find("end_frame_idx").get("value"))
-    cams = []
-    for c in cameras_root.findall("camera"):
-        id = int(c.get("id"))
-        sid = int(c.get("sensor_id"))
-        sensor = sensors[sid]
+            mat_string = c.find(".//transform").text
+            c2w = extract_c2w_mat_from_xml_string(mat_string)
 
-        mat_string = c.find(".//transform").text
-        c2w = extract_c2w_mat_from_xml_string(mat_string)
+            # for Camera obj we need R and T of the w2c matrix
+            w2c = np.linalg.inv(c2w)
+            R = np.transpose(w2c[:3, :3])   # R is stored transposed due to 'glm' in CUDA code
+            T = w2c[:3, 3]
 
-        # for Camera obj we need R and T of the w2c matrix
-        w2c = np.linalg.inv(c2w)
-        R = np.transpose(w2c[:3, :3])   # R is stored transposed due to 'glm' in CUDA code
-        # print("WOW")
-        # print(w2c[:3, 3])
-        # print(centroid.numpy())
-        # print((w2c[:3, 3] - centroid.numpy()))
-        # print((w2c[:3, 3] - centroid.numpy()) * rescale_factor)
-        
-        T = w2c[:3, 3]
+            # bg = np.array([1, 1, 1]) if white_background else np.array([0, 0, 0])
 
-        # bg = np.array([1, 1, 1]) if white_background else np.array([0, 0, 0])
-
-        # create a camera for each timestep
-        camera_images_folder_path = os.path.join(source_path, images_folder_name, str(id))
-        image_paths = sorted(glob.glob(os.path.join(camera_images_folder_path, "*.png")))
-        # Loop through all images and create a camera for each
-        for image_path in image_paths:
-            image_name = os.path.basename(image_path)
-            timestep = int(os.path.basename(image_path).split(".")[0])  # naming convention of image is {camera_id}/{timestep}.png
-            # select appropriate frames
-            if (first_frame <= timestep <= last_frame):
-                # param 'image' is None since it is loaded dynamically by the DatasetLoader in train.py
-                cam = CameraInfo(uid=id, FovY=sensor.FovY, FovX=sensor.FovX, width=sensor.width, height=sensor.height,
-                                 R=R, T=T, image=None, image_path=image_path, image_name=image_name, timestep=timestep,
-                                 trans=-centroid.numpy(), scale=rescale_factor)
-                cams.append(cam)
-                # print(f"Loaded camera {id} with frame {timestep}")
+            # create a camera for each timestep
+            camera_images_folder_path = os.path.join(source_path, images_folder_name, str(id))
+            image_paths = sorted(glob.glob(os.path.join(camera_images_folder_path, "*.png")))
+            # Loop through all images and create a camera for each
+            for image_path in image_paths:
+                image_name = os.path.basename(image_path)
+                timestep = int(os.path.basename(image_path).split(".")[0])  # naming convention of image is {camera_id}/{timestep}.png
+                # select appropriate frames
+                if (first_frame <= timestep <= last_frame):
+                    # param 'image' is None since it is loaded dynamically by the DatasetLoader in train.py
+                    cam = CameraInfo(uid=id,R=R, T=T,
+                                     sensor_info=sensor_info,
+                                     timestep=timestep,
+                                     image=None, image_path=image_path, image_name=image_name,
+                                     trans=-centroid.numpy(), scale=rescale_factor)
+                    cams.append(cam)
+                    # print(f"Loaded camera {id} with frame {timestep}")
 
     print(f"Loaded {len(cams)} cameras for {cameras_xml_file_name}")
     return cams
@@ -251,7 +283,7 @@ def storePly(path, xyz, rgb):
     dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
             ('nx', 'f4'), ('ny', 'f4'), ('nz', 'f4'),
             ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')]
-    
+
     normals = np.zeros_like(xyz)
 
     elements = np.empty(xyz.shape[0], dtype=dtype)

@@ -9,10 +9,12 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
-import torch
 import math
-import numpy as np
 from typing import NamedTuple
+
+import numpy as np
+import torch
+
 
 class BasicPointCloud(NamedTuple):
     points : np.array
@@ -47,6 +49,16 @@ def getWorld2View2(R, t, translate=np.array([.0, .0, .0]), scale=1.0):
     C2W[:3, 3] = cam_center
     Rt = np.linalg.inv(C2W)
     return np.float32(Rt)
+
+def getIntrinsicsMatrixK(fl_x, fl_y, cx, cy):
+    k = torch.zeros(4,4)
+    k[0,0] = fl_x
+    k[1,1] = fl_y
+    k[0,2] = cx
+    k[1,2] = cy
+    k[2,2] = 1
+    k[3,3] = 1
+    return k
 
 def getProjectionMatrix(znear, zfar, fovX, fovY):
     tanHalfFovY = math.tan((fovY / 2))

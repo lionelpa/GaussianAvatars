@@ -19,7 +19,7 @@ from utils.graphics_utils import fov2focal
 WARNED = False
 
 def loadCam(args, id, cam_info, resolution_scale):
-    orig_w, orig_h = cam_info.width, cam_info.height
+    orig_w, orig_h = cam_info.sensor_info.width, cam_info.sensor_info.height
 
     if args.resolution in [1, 2, 4, 8]:
         image_width, image_height = round(orig_w/(resolution_scale * args.resolution)), round(orig_h/(resolution_scale * args.resolution))
@@ -40,13 +40,16 @@ def loadCam(args, id, cam_info, resolution_scale):
         scale = float(global_down) * float(resolution_scale)
         image_width, image_height = (int(orig_w / scale), int(orig_h / scale))
 
-    return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
-                  FoVx=cam_info.FovX, FoVy=cam_info.FovY, 
-                  image_width=image_width, image_height=image_height,
-                  bg=cam_info.bg, 
-                  image=cam_info.image, 
+    return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T,
+                  FoVx=cam_info.sensor_info.fovX, FoVy=cam_info.sensor_info.fovY,
+                  image_width=cam_info.sensor_info.width, image_height=image_height,
+                  fl_x=cam_info.sensor_info.fl_x, fl_y=cam_info.sensor_info.fl_y, cx=cam_info.sensor_info.cx, cy=cam_info.sensor_info.cy,
+                  k1=cam_info.sensor_info.k1, k2=cam_info.sensor_info.k2, k3=cam_info.sensor_info.k3,
+                  p1=cam_info.sensor_info.p1, p2=cam_info.sensor_info.p2,
+                  bg=cam_info.bg,
+                  image=cam_info.image,
                   image_path=cam_info.image_path,
-                  image_name=cam_info.image_name, uid=id, 
+                  image_name=cam_info.image_name, uid=id,
                   timestep=cam_info.timestep, data_device=args.data_device,
                   trans=cam_info.trans, scale=cam_info.scale)
 
@@ -74,12 +77,12 @@ def camera_to_JSON(id, camera : Camera):
     camera_entry = {
         'id' : id,
         'img_name' : camera.image_name,
-        'width' : camera.width,
-        'height' : camera.height,
+        'width' : camera.sensor_info.width,
+        'height' : camera.sensor_info.height,
         'position': pos.tolist(),
         'rotation': serializable_array_2d,
-        'fy' : fov2focal(camera.FovY, camera.height),
-        'fx' : fov2focal(camera.FovX, camera.width)
+        'fy' : fov2focal(camera.sensor_info.fovY, camera.sensor_info.height),
+        'fx' : fov2focal(camera.sensor_info.fovX, camera.sensor_info.width)
     }
     return camera_entry
 
