@@ -57,7 +57,7 @@ def getIntrinsicsMatrixK(fl_x, fl_y, cx, cy):
     k[0,2] = cx
     k[1,2] = cy
     k[2,2] = 1
-    k[3,3] = 1
+    k[3,2] = 1
     return k
 
 def getProjectionMatrix(znear, zfar, fovX, fovY):

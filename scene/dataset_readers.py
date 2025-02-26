@@ -153,7 +153,6 @@ def readSceneInfoForScannerWB(source_path, images_folder_name, centroid, rescale
 def get_calibration(root):
     for sensor in root[0]:
         for child in sensor:
-            print(child.tag)
             if child.tag == "calibration":
                 return child
     print("No calibration found")

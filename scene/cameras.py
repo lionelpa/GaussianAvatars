@@ -13,7 +13,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from utils.graphics_utils import getWorld2View2, getIntrinsicsMatrixK
+from utils.graphics_utils import getWorld2View2, getProjectionMatrix, getIntrinsicsMatrixK
 
 
 class Camera(nn.Module):
@@ -56,8 +56,8 @@ class Camera(nn.Module):
 
         self.world_view_transform = torch.tensor(getWorld2View2(R, T, trans, scale)).transpose(0, 1)  #.cuda()
 
-        # self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1)  #.cuda()
-        self.projection_matrix = getIntrinsicsMatrixK(fl_x, fl_y, cx, cy).transpose(0,1)  #.cuda()
+        self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1)  #.cuda()
+        # self.projection_matrix = getIntrinsicsMatrixK(fl_x, fl_y, cx, cy).transpose(0,1)  #.cuda()
 
         self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
         self.camera_center = self.world_view_transform.inverse()[3, :3]
