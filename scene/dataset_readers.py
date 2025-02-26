@@ -24,8 +24,6 @@ from tqdm import tqdm
 from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec2rotmat, \
     read_extrinsics_binary, read_intrinsics_binary, read_points3D_binary, read_points3D_text
 from scene.gaussian_model import BasicPointCloud
-from utils.camera_utils import extract_c2w_mat_from_xml_string
-from utils.general_utils import save_as_ply
 from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
 from utils.sh_utils import SH2RGB
 
@@ -107,17 +105,68 @@ def getNerfppNormHylec(cam_info):
     translate = -center
     return {"translate": translate, "radius": radius}
 
-def readSceneInfoForScannerWB(source_path, images_folder_name, centroid, rescale_factor):
-    print(">>> Loading training cameras...")
-    train_cam_infos = readWBCamerasFromXML(source_path, images_folder_name, "cameras_train.xml", centroid, rescale_factor)
-    print(">>> Loading validation cameras...")
-    val_cam_infos = readWBCamerasFromXML(source_path, images_folder_name, "cameras_val.xml", centroid, rescale_factor)
-    print(">>> Loading test cameras...")
-    test_cam_infos = readWBCamerasFromXML(source_path, images_folder_name, "cameras_test.xml", centroid, rescale_factor)
-    print(">>> Finished loading cameras!")
+def readSceneInfoForScannerWB(source_path, images_folder_name, centroid, rescale_factor, val_cam_ids, train_frames, test_frames):
+    label_to_w2c, label_to_sid = extrinsics_from_xml(os.path.join(source_path, "cameras.xml"))
+    sid_to_intr, sid_to_res = intrinsics_from_xml(os.path.join(source_path, "cameras.xml"))
+
+    train_cam_infos = []
+    val_cam_infos = []
+    test_cam_infos = []
+    discarded_frames = set()
+    for cam_label, w2c in label_to_w2c.items():
+        cam_id = int(cam_label)
+        s_id = label_to_sid[cam_label]
+        s_intr = sid_to_intr[s_id]
+
+        foc_x = s_intr[0,0]
+        foc_y = s_intr[1,1]
+        cx =  s_intr[0,2]
+        cy = s_intr[1,2]
+        width, height = sid_to_res[s_id]
+        width = int(width)
+        height = int(height)
+
+        fovX = focal2fov(foc_x, width)
+        fovY = focal2fov(foc_y, height)
+
+        # for Camera obj we need R and T of the w2c matrix
+        R = np.transpose(w2c[:3, :3])  # R is stored transposed due to 'glm' in CUDA code
+        # R = w2c[:3, :3]  # R is stored transposed due to 'glm' in CUDA code
+        T = w2c[:3, 3]
+
+        # bg = np.array([1, 1, 1]) if white_background else np.array([0, 0, 0])
+
+        # create a camera for each timestep
+        ## first get source folder named after cam id
+        camera_images_folder_path = os.path.join(source_path, images_folder_name, str(cam_id))
+        image_paths = sorted(glob.glob(os.path.join(camera_images_folder_path, "*.png")))
+        ## Loop through all images and create a camera for each
+        for image_path in image_paths:
+            image_name = os.path.basename(image_path)
+            # naming convention of image is {camera_id}/{timestep}.png
+            timestep = int(os.path.basename(image_path).split(".")[0])
+            # param 'image' is None since it is loaded dynamically by the DatasetLoader in train.py
+            cam = CameraInfo(uid=cam_id, FovX=fovX, FovY=fovY, width=width, height=height,
+                             R=R, T=T, image=None, image_path=image_path, image_name=image_name, timestep=timestep,
+                             trans=-centroid.numpy(), scale=rescale_factor)
+
+            if timestep in test_frames:
+                test_cam_infos.append(cam)
+            elif timestep in train_frames:
+                if cam_id in val_cam_ids:
+                    val_cam_infos.append(cam)
+                else:
+                    train_cam_infos.append(cam)
+            else:
+                discarded_frames.add(timestep)
+    print(f"[WARNING]: Discarded the following frames:\n{sorted(list(discarded_frames))}")
+
+    assert len(train_cam_infos) == ((len(label_to_w2c) - len(val_cam_ids)) * len(train_frames))
+    assert len(val_cam_infos) == (len(val_cam_ids) * len(train_frames))
+    assert len(test_cam_infos) == (len(label_to_w2c) * len(test_frames))
 
     # todo 25.9.24: Double check if correct here
-    nerf_normalization = getNerfppNormHylec(train_cam_infos)
+    nerf_normalization = getNerfppNorm(train_cam_infos + val_cam_infos + test_cam_infos)
 
     scene_info = SceneInfo(point_cloud=None,
                            train_cameras=train_cam_infos,
@@ -126,76 +175,6 @@ def readSceneInfoForScannerWB(source_path, images_folder_name, centroid, rescale
                            nerf_normalization=nerf_normalization,
                            ply_path=None)
     return scene_info
-
-
-def readWBCamerasFromXML(source_path, images_folder_name, cameras_xml_file_name, centroid, rescale_factor):
-    camsXML_path = os.path.join(source_path, cameras_xml_file_name)
-    tree = ET.parse(camsXML_path)
-    root = tree.getroot()
-
-    # read sensors
-    sensors_root = root.find("sensors") # first chunk contains sensors intrinsics
-    sensors = dict()
-    for s in sensors_root.findall("sensor"):
-        sid = int(s.get("id"))
-
-        c = s.find("calibration")
-        r = c.find("resolution")
-        height = int(r.get("height"))
-        width = int(r.get("width"))
-        focal_in_pix = float(c.find("f").text)
-
-        # calculate fovs from
-        fovX = focal2fov(focal_in_pix, width)
-        fovY = focal2fov(focal_in_pix, height)
-
-        sensor_info = CameraInfo(uid=sid, FovX=fovX, FovY=fovY, width=width, height=height,
-                                 R=None, T=None, image=None, image_path=None, image_name=None)
-        sensors.update({sid: sensor_info})
-    # read cameras
-    cameras_root = root.find("cameras")  # first chunk contains all extrinsics
-    first_frame = int(root.find("start_frame_idx").get("value"))
-    last_frame = int(root.find("end_frame_idx").get("value"))
-    cams = []
-    for c in cameras_root.findall("camera"):
-        id = int(c.get("id"))
-        sid = int(c.get("sensor_id"))
-        sensor = sensors[sid]
-
-        mat_string = c.find(".//transform").text
-        c2w = extract_c2w_mat_from_xml_string(mat_string)
-
-        # for Camera obj we need R and T of the w2c matrix
-        w2c = np.linalg.inv(c2w)
-        R = np.transpose(w2c[:3, :3])   # R is stored transposed due to 'glm' in CUDA code
-        # print("WOW")
-        # print(w2c[:3, 3])
-        # print(centroid.numpy())
-        # print((w2c[:3, 3] - centroid.numpy()))
-        # print((w2c[:3, 3] - centroid.numpy()) * rescale_factor)
-        
-        T = w2c[:3, 3]
-
-        # bg = np.array([1, 1, 1]) if white_background else np.array([0, 0, 0])
-
-        # create a camera for each timestep
-        camera_images_folder_path = os.path.join(source_path, images_folder_name, str(id))
-        image_paths = sorted(glob.glob(os.path.join(camera_images_folder_path, "*.png")))
-        # Loop through all images and create a camera for each
-        for image_path in image_paths:
-            image_name = os.path.basename(image_path)
-            timestep = int(os.path.basename(image_path).split(".")[0])  # naming convention of image is {camera_id}/{timestep}.png
-            # select appropriate frames
-            if (first_frame <= timestep <= last_frame):
-                # param 'image' is None since it is loaded dynamically by the DatasetLoader in train.py
-                cam = CameraInfo(uid=id, FovY=sensor.FovY, FovX=sensor.FovX, width=sensor.width, height=sensor.height,
-                                 R=R, T=T, image=None, image_path=image_path, image_name=image_name, timestep=timestep,
-                                 trans=-centroid.numpy(), scale=rescale_factor)
-                cams.append(cam)
-                # print(f"Loaded camera {id} with frame {timestep}")
-
-    print(f"Loaded {len(cams)} cameras for {cameras_xml_file_name}")
-    return cams
 
 
 def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
@@ -474,6 +453,80 @@ def readDynamicNerfInfo(path, white_background, eval, extension=".png", target_p
                            tgt_train_meshes=tgt_train_mesh_infos,
                            tgt_test_meshes=tgt_test_mesh_infos)
     return scene_info
+
+############################################################################
+# START
+# Taken from https://github.com/THU-luvision/XScale-NVS/blob/master/scripts/xml2txt.py
+
+def intrinsics_from_xml(xml_file, f=None):
+    root = ET.parse(xml_file).getroot()
+    intrinsics = {}
+    img_sizes = {}
+    for e in root.findall('sensors')[0].findall('sensor'):
+        sensor_id = e.get('id')
+        calibration = e.find('calibration')
+        resolution = e.find('resolution')
+        width = float(resolution.get('width'))
+        height = float(resolution.get('height'))
+        # f = 7963.8462
+        f = float(calibration.find('f').text)
+        delta_cx = float(calibration.find('cx').text)
+        delta_cy = float(calibration.find('cy').text)
+        # delta_cx = 0.
+        # delta_cy = 0.
+        cx = width / 2 + delta_cx
+        cy = height / 2 + delta_cy
+        intrinsics[sensor_id] = np.array([
+            [f, 0, cx],
+            [0, f, cy],
+            [0, 0, 1]
+        ], dtype=np.float32)
+        img_sizes[sensor_id] = (width, height)
+    return intrinsics, img_sizes
+
+def extrinsics_from_xml(xml_file, verbose=False, group=None):
+    if group is not None:
+        root = ET.parse(xml_file).getroot()
+        extrinsics = {}
+        ext_sids = {}
+
+        for g in root.findall('chunk/cameras')[0].findall('group'):
+            label = g.get('label')
+            if label == group:
+                for e in g.findall('camera'):
+                    label = e.get('label')
+                    sensor_id = e.get('sensor_id')
+                    try:
+                        transforms = e.find('transform').text
+                        extrinsic = np.array([float(x) for x in transforms.split()]).reshape(4, 4)
+                        # extrinsic[:, 1:3] *= -1
+                        extrinsics[label] = np.linalg.inv(extrinsic)
+                        ext_sids[label] = sensor_id
+                    except:
+                        if verbose:
+                            print('failed to align camera', label)
+
+    else:
+        root = ET.parse(xml_file).getroot()
+        extrinsics = {}
+        ext_sids = {}
+        for e in root.findall('cameras')[0].findall('camera'):
+            label = e.get('label')
+            sensor_id = e.get('sensor_id')
+            try:
+                transforms = e.find('transform').text
+                extrinsic = np.array([float(x) for x in transforms.split()]).reshape(4, 4)
+                # extrinsic[:, 1:3] *= -1
+                extrinsics[label] = np.linalg.inv(extrinsic)
+                ext_sids[label] = sensor_id
+            except:
+                if verbose:
+                    print('failed to align camera', label)
+    return extrinsics, ext_sids
+
+# END
+# Taken from https://github.com/THU-luvision/XScale-NVS/blob/master/scripts/xml2txt.py
+############################################################################
 
 sceneLoadTypeCallbacks = {
     "ScannerWB": readSceneInfoForScannerWB,
