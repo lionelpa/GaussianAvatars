@@ -9,9 +9,10 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
-from argparse import ArgumentParser, Namespace
-import sys
 import os
+import sys
+from argparse import ArgumentParser, Namespace
+
 
 class GroupParams:
     pass
@@ -59,6 +60,8 @@ class ModelParams(ParamGroup):
         self.disable_flame_static_offset = False
         self.not_finetune_flame_params = False
         self.select_camera_id = -1
+        self.init_pcd_from_texture = False
+        self.center_and_scale = False
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):

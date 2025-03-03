@@ -9,27 +9,26 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
-import os
 import json
-import torch
-from torch.utils.data import DataLoader
-import torch.nn.functional as F
-from random import randint
-from utils.loss_utils import l1_loss, ssim
-from gaussian_renderer import render, network_gui
-from mesh_renderer import NVDiffRenderer
+import os
 import sys
-from scene import Scene, GaussianModel, FlameGaussianModel
-from utils.general_utils import safe_state
 import uuid
-from tqdm import tqdm
-from utils.image_utils import psnr, error_map
-from lpipsPyTorch import lpips
 from argparse import ArgumentParser, Namespace
+
+import torch
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+
 from arguments import ModelParams, PipelineParams, OptimizationParams
+from gaussian_renderer import render, network_gui
+from lpipsPyTorch import lpips
+from mesh_renderer import NVDiffRenderer
+from scene import Scene, GaussianModel
 from scene.wb_gaussian_model import WBGaussianModel
-from utils.image_utils import save_tensor_as_image
-from datetime import datetime
+from utils.general_utils import safe_state
+from utils.image_utils import psnr, error_map
+from utils.loss_utils import l1_loss, ssim
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -37,11 +36,11 @@ try:
 except ImportError:
     TENSORBOARD_FOUND = False
 
-def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, center_and_scale):
+def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     if dataset.bind_to_mesh:
-        gaussians = WBGaussianModel(center_and_scale, dataset.sh_degree)
+        gaussians = WBGaussianModel(dataset.center_and_scale, dataset.sh_degree)
         mesh_renderer = NVDiffRenderer()
     else:
         gaussians = GaussianModel(dataset.sh_degree)
@@ -367,10 +366,8 @@ if __name__ == "__main__":
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
-    parser.add_argument("-cs", "--center_and_scale", action="store_true", default=False, help="Enable centering and scaling of wb mesh to approximate flame setup")
     args = parser.parse_args(sys.argv[1:])
-    if not args.center_and_scale:
-        raise Exception("Centering and rescaling should be on!")
+
     if args.interval > op.iterations:
         args.interval = op.iterations // 5
     if len(args.test_iterations) == 0:
@@ -402,8 +399,7 @@ if __name__ == "__main__":
         args.save_iterations, 
         args.checkpoint_iterations, 
         args.start_checkpoint, 
-        args.debug_from,
-        args.center_and_scale)
+        args.debug_from)
 
     # All done
     print("\nTraining complete.")

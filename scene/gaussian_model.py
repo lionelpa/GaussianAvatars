@@ -9,20 +9,23 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
-from typing import Optional
-import torch
-import numpy as np
-from utils.general_utils import inverse_sigmoid, get_expon_lr_func, build_rotation
-from torch import nn
 import os
-from utils.system_utils import mkdir_p
+from typing import Optional
+
+import numpy as np
+import torch
 from plyfile import PlyData, PlyElement
 # from pytorch3d.transforms import quaternion_multiply
 from roma import quat_product, quat_xyzw_to_wxyz, quat_wxyz_to_xyzw
-from utils.sh_utils import RGB2SH
 from simple_knn._C import distCUDA2
-from utils.graphics_utils import BasicPointCloud
+from torch import nn
+
+from utils.general_utils import inverse_sigmoid, get_expon_lr_func, build_rotation
 from utils.general_utils import strip_symmetric, build_scaling_rotation
+from utils.graphics_utils import BasicPointCloud
+from utils.sh_utils import RGB2SH
+from utils.system_utils import mkdir_p
+
 
 class GaussianModel:
 
@@ -169,14 +172,17 @@ class GaussianModel:
         if self.active_sh_degree < self.max_sh_degree:
             self.active_sh_degree += 1
 
-    def create_from_pcd(self, pcd : Optional[BasicPointCloud], spatial_lr_scale : float):
+    def create_from_pcd(self, pcd : Optional[BasicPointCloud], spatial_lr_scale : float, init_pcd_from_texture: bool):
         self.spatial_lr_scale = spatial_lr_scale
         if pcd == None:
             assert self.binding is not None
             num_pts = self.binding.shape[0]
             fused_point_cloud = torch.zeros((num_pts, 3)).float().cuda()
-            # fused_color = torch.tensor(np.random.random((num_pts, 3)) / 255.0).float().cuda()
-            fused_color = torch.tensor(self.calc_init_tri_color()).float().cuda()
+            if init_pcd_from_texture:
+                print("Initializing point cloud from texture...")
+                fused_color = torch.tensor(self.calc_init_tri_color()).float().cuda()
+            else:
+                fused_color = torch.tensor(np.random.random((num_pts, 3)) / 255.0).float().cuda()
         else:
             fused_point_cloud = torch.tensor(np.asarray(pcd.points)).float().cuda()
             fused_color = RGB2SH(torch.tensor(np.asarray(pcd.colors)).float().cuda())
