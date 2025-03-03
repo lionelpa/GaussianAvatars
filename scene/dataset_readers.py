@@ -106,11 +106,11 @@ def getNerfppNormHylec(cam_info):
     translate = -center
     return {"translate": translate, "radius": radius}
 
-def readSceneInfoForScannerWB(source_path, images_folder_name, centroid, rescale_factor, val_cam_ids, train_frames, test_frames):
+def readSceneInfoForScannerWB(source_path, images_folder_name, centroid, rescale_factor, val_cam_ids, train_frames, test_frames, eval):
     train_cam_infos, val_cam_infos, test_cam_infos = readWBCamerasFromXML(source_path, images_folder_name,
                                                                           "cameras.xml",
-                                                                          centroid, rescale_factor, val_cam_ids,
-                                                                          train_frames, test_frames)
+                                                                          centroid, rescale_factor, 
+                                                                          val_cam_ids, train_frames, test_frames, eval)
     # todo 25.9.24: Double check if correct here
     nerf_normalization = getNerfppNormHylec(train_cam_infos)
 
@@ -123,7 +123,7 @@ def readSceneInfoForScannerWB(source_path, images_folder_name, centroid, rescale
     return scene_info
 
 
-def readWBCamerasFromXML(source_path, images_folder_name, cameras_xml_file_name, centroid, rescale_factor, val_cam_ids, train_frames, test_frames):
+def readWBCamerasFromXML(source_path, images_folder_name, cameras_xml_file_name, centroid, rescale_factor, val_cam_ids, train_frames, test_frames, eval):
     camsXML_path = os.path.join(source_path, cameras_xml_file_name)
     tree = ET.parse(camsXML_path)
     root = tree.getroot()
@@ -204,6 +204,9 @@ def readWBCamerasFromXML(source_path, images_folder_name, cameras_xml_file_name,
     print(f"#Test : {len(test_cam_infos)} total = {len(test_cam_infos)//len(test_frames)} cams x {len(test_frames)} frames")
     print(f"[WARNING]: Discarded the following frames:\n{sorted(list(discarded_frames))}")
 
+    if not eval:
+        print("Eval param is false -> discarding testing cams")
+        test_cam_infos = []
     return train_cam_infos, val_cam_infos, test_cam_infos
 
 
