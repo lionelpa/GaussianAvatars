@@ -92,7 +92,7 @@ class LocalViewer(Mini3DViewer):
 
     def init_gaussians(self):
         # load gaussians
-        self.gaussians = WBGaussianModel(self.cfg.sh_degree)
+        self.gaussians = WBGaussianModel(True, self.cfg.sh_degree)
         unselected_fid = []
         
         if self.cfg.point_path is not None:

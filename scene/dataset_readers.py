@@ -25,7 +25,6 @@ from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec
     read_extrinsics_binary, read_intrinsics_binary, read_points3D_binary, read_points3D_text
 from scene.gaussian_model import BasicPointCloud
 from utils.camera_utils import extract_c2w_mat_from_xml_string
-from utils.general_utils import save_as_ply
 from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
 from utils.sh_utils import SH2RGB
 
@@ -107,15 +106,11 @@ def getNerfppNormHylec(cam_info):
     translate = -center
     return {"translate": translate, "radius": radius}
 
-def readSceneInfoForScannerWB(source_path, images_folder_name, centroid, rescale_factor):
-    print(">>> Loading training cameras...")
-    train_cam_infos = readWBCamerasFromXML(source_path, images_folder_name, "cameras_train.xml", centroid, rescale_factor)
-    print(">>> Loading validation cameras...")
-    val_cam_infos = readWBCamerasFromXML(source_path, images_folder_name, "cameras_val.xml", centroid, rescale_factor)
-    print(">>> Loading test cameras...")
-    test_cam_infos = readWBCamerasFromXML(source_path, images_folder_name, "cameras_test.xml", centroid, rescale_factor)
-    print(">>> Finished loading cameras!")
-
+def readSceneInfoForScannerWB(source_path, images_folder_name, centroid, rescale_factor, val_cam_ids, train_frames, test_frames):
+    train_cam_infos, val_cam_infos, test_cam_infos = readWBCamerasFromXML(source_path, images_folder_name,
+                                                                          "cameras.xml",
+                                                                          centroid, rescale_factor, val_cam_ids,
+                                                                          train_frames, test_frames)
     # todo 25.9.24: Double check if correct here
     nerf_normalization = getNerfppNormHylec(train_cam_infos)
 
@@ -128,7 +123,7 @@ def readSceneInfoForScannerWB(source_path, images_folder_name, centroid, rescale
     return scene_info
 
 
-def readWBCamerasFromXML(source_path, images_folder_name, cameras_xml_file_name, centroid, rescale_factor):
+def readWBCamerasFromXML(source_path, images_folder_name, cameras_xml_file_name, centroid, rescale_factor, val_cam_ids, train_frames, test_frames):
     camsXML_path = os.path.join(source_path, cameras_xml_file_name)
     tree = ET.parse(camsXML_path)
     root = tree.getroot()
@@ -154,11 +149,13 @@ def readWBCamerasFromXML(source_path, images_folder_name, cameras_xml_file_name,
         sensors.update({sid: sensor_info})
     # read cameras
     cameras_root = root.find("cameras")  # first chunk contains all extrinsics
-    first_frame = int(root.find("start_frame_idx").get("value"))
-    last_frame = int(root.find("end_frame_idx").get("value"))
-    cams = []
+
+    train_cam_infos = []
+    val_cam_infos = []
+    test_cam_infos = []
+    discarded_frames = set()
     for c in cameras_root.findall("camera"):
-        id = int(c.get("id"))
+        cam_id = int(c.get("id"))
         sid = int(c.get("sensor_id"))
         sensor = sensors[sid]
 
@@ -179,23 +176,35 @@ def readWBCamerasFromXML(source_path, images_folder_name, cameras_xml_file_name,
         # bg = np.array([1, 1, 1]) if white_background else np.array([0, 0, 0])
 
         # create a camera for each timestep
-        camera_images_folder_path = os.path.join(source_path, images_folder_name, str(id))
+        camera_images_folder_path = os.path.join(source_path, images_folder_name, str(cam_id))
         image_paths = sorted(glob.glob(os.path.join(camera_images_folder_path, "*.png")))
         # Loop through all images and create a camera for each
         for image_path in image_paths:
             image_name = os.path.basename(image_path)
             timestep = int(os.path.basename(image_path).split(".")[0])  # naming convention of image is {camera_id}/{timestep}.png
-            # select appropriate frames
-            if (first_frame <= timestep <= last_frame):
-                # param 'image' is None since it is loaded dynamically by the DatasetLoader in train.py
-                cam = CameraInfo(uid=id, FovY=sensor.FovY, FovX=sensor.FovX, width=sensor.width, height=sensor.height,
-                                 R=R, T=T, image=None, image_path=image_path, image_name=image_name, timestep=timestep,
-                                 trans=-centroid.numpy(), scale=rescale_factor)
-                cams.append(cam)
-                # print(f"Loaded camera {id} with frame {timestep}")
 
-    print(f"Loaded {len(cams)} cameras for {cameras_xml_file_name}")
-    return cams
+            # param 'image' is None since it is loaded dynamically by the DatasetLoader in train.py
+            cam = CameraInfo(uid=cam_id, FovY=sensor.FovY, FovX=sensor.FovX, width=sensor.width, height=sensor.height,
+                             R=R, T=T, image=None, image_path=image_path, image_name=image_name, timestep=timestep,
+                             trans=-centroid.numpy(), scale=rescale_factor)
+
+            if timestep in test_frames:
+                test_cam_infos.append(cam)
+            elif timestep in train_frames:
+                if cam_id in val_cam_ids:
+                    val_cam_infos.append(cam)
+                else:
+                    train_cam_infos.append(cam)
+            else:
+                discarded_frames.add(timestep)
+
+    print(f"===== Finished loading cameras from {camsXML_path}")
+    print(f"#Train: {len(train_cam_infos)} total = {len(train_cam_infos)//len(train_frames)} cams x {len(train_frames)} frames")
+    print(f"#Val  : {len(val_cam_infos)} total = {len(val_cam_ids)} cams x {len(train_frames)} frames")
+    print(f"#Test : {len(test_cam_infos)} total = {len(test_cam_infos)//len(test_frames)} cams x {len(test_frames)} frames")
+    print(f"[WARNING]: Discarded the following frames:\n{sorted(list(discarded_frames))}")
+
+    return train_cam_infos, val_cam_infos, test_cam_infos
 
 
 def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
