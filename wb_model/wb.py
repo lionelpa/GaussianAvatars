@@ -133,8 +133,8 @@ class WBModel(nn.Module):
             mesh_dict[timestep] = verts
         return mesh_dict
 
-    def forward(self, timestep, static_offset):
-        return self.timestep_to_mesh_dict[timestep] + static_offset
+    def forward(self, timestep, rotation, translation):
+        return self.timestep_to_mesh_dict[timestep]
 
 
 if __name__ == '__main__':
