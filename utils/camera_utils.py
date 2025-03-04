@@ -13,7 +13,7 @@ import string
 import numpy as np
 from tqdm import tqdm
 
-from scene.cameras import Camera
+from scene.cameras import Camera, MiniCam
 from utils.graphics_utils import fov2focal
 
 WARNED = False
@@ -91,3 +91,17 @@ def extract_c2w_mat_from_xml_string(matrix_string: string):
     c2w_mat = np.array(matrix_values).reshape(4, 4)
 
     return c2w_mat
+
+
+def camera2miniCam(camera: Camera):
+    return MiniCam(
+        width=camera.image_width,
+        height=camera.image_height,
+        fovx=camera.FoVx,
+        fovy=camera.FoVy,
+        znear=camera.znear,
+        zfar=camera.zfar,
+        world_view_transform=camera.world_view_transform,
+        full_proj_transform=camera.full_proj_transform,
+        timestep=camera.timestep,
+    )
