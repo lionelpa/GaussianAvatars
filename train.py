@@ -29,6 +29,7 @@ from scene.wb_gaussian_model import WBGaussianModel
 from utils.general_utils import safe_state
 from utils.image_utils import psnr, error_map
 from utils.loss_utils import l1_loss, ssim
+from utils.camera_utils import camera2miniCam
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -45,7 +46,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     else:
         gaussians = GaussianModel(dataset.sh_degree)
     scene = Scene(dataset, gaussians)
-    gaussians.save_ply_for_SIBR(f"{dataset.model_path}/_init_gaussians.ply", scene, render_debug_origin=True)
+    # gaussians.save_ply_for_SIBR(f"{dataset.model_path}/_init_gaussians.ply", scene, render_debug_origin=True)
     gaussians.training_setup(opt)
 
     if checkpoint:
@@ -204,7 +205,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 progress_bar.close()
 
             # Log and save
-            training_report(tb_writer, iteration, losses, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
+            training_report(tb_writer, iteration, losses, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background), mesh_renderer)
             if (iteration in saving_iterations):
                 print("[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
@@ -253,7 +254,7 @@ def prepare_output_and_logger(args):
         print("Tensorboard not available: not logging progress")
     return tb_writer
 
-def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs):
+def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs, mesh_renderer):
     if tb_writer:
         tb_writer.add_scalar('train_loss_patches/l1_loss', losses['l1'].item(), iteration)
         tb_writer.add_scalar('train_loss_patches/ssim_loss', losses['ssim'].item(), iteration)
@@ -269,6 +270,24 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
             tb_writer.add_scalar('train_loss_patches/dynamic_offset_std', losses['dynamic_offset_std'].item(), iteration)
         tb_writer.add_scalar('train_loss_patches/total_loss', losses['total'].item(), iteration)
         tb_writer.add_scalar('iter_time', elapsed, iteration)
+
+    # if tb_writer:
+    #     for viewpoint in scene.getValCameras():
+    #         if viewpoint.timestep in [4, 31, 62, 134, 164, 224, 279, 399] and iteration in [1,50,100,150,200,250,300,500,1000,2000,5000,10000,20000,50000,100000,300000,600000]:
+    #             out_dict = mesh_renderer.render_from_camera(scene.gaussians.verts, scene.gaussians.faces, camera2miniCam(viewpoint)), 0.0, 1.0
+    #             rgba_mesh = torch.clamp(out_dict['rgba'].squeeze(0), 0.0, 1.0)  # (H, W, C)
+    #             rgb_mesh = rgba_mesh[:, :, :3]
+    #             alpha_mesh = rgba_mesh[:, :, 3:]
+    #             mesh_opacity = torch.tensor([0.8]).cuda()
+    #             rgb_gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)[:,:,:3]
+
+    #             rgb = rgb_mesh * alpha_mesh * mesh_opacity  + rgb_gt_image * (alpha_mesh * (1 - mesh_opacity) + (1 - alpha_mesh))
+    #             tb_writer.add_images(f"cam{viewpoint.uid}_timestep{viewpoint.timestep}", rgb[None], global_step=iteration)
+
+    if tb_writer:
+            tb_writer.add_histogram("scene/opacity_histogram", scene.gaussians.get_opacity, iteration)
+            tb_writer.add_scalar('total_points', scene.gaussians.get_xyz.shape[0], iteration)
+            # tb_writer.add_scalar('static_offset_total', torch.sum(torch.norm(scene.gaussians.model_params['static_offset'])).cpu().numpy(), iteration)
 
     # Report test and samples of training set
     if iteration in testing_iterations:
@@ -326,9 +345,6 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - ssim', ssim_test, iteration)
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - lpips', lpips_test, iteration)
 
-        if tb_writer:
-            tb_writer.add_histogram("scene/opacity_histogram", scene.gaussians.get_opacity, iteration)
-            tb_writer.add_scalar('total_points', scene.gaussians.get_xyz.shape[0], iteration)
         torch.cuda.empty_cache()
 
 def save_params_to_json(lp, op, pp, args, folder, filename="params_ga.json"):
