@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import NamedTuple, Optional
 
 import numpy as np
+import torch
 from PIL import Image
 from plyfile import PlyData, PlyElement
 from tqdm import tqdm
@@ -106,19 +107,77 @@ def getNerfppNormHylec(cam_info):
     translate = -center
     return {"translate": translate, "radius": radius}
 
+
+def readMeshParamsForFrames(source_path, train_frames, test_frames, eval):
+    params_path = os.path.join(source_path, "meshes_weights")
+    wanted_frames = train_frames.union(test_frames) if eval else train_frames
+    Rs = [f"{f}_R.txt" for f in wanted_frames] # naming convention is {frame}_R.txt
+    Ts = [f"{f}_t.txt" for f in wanted_frames] # naming convention is {frame}_t.txt
+    Ss = [f"{f}_s.txt" for f in wanted_frames] # naming convention is {frame}_s.txt
+    Ws = [f"{f}_w.txt" for f in wanted_frames] # naming convention is {frame}_w.txt
+
+    Rs = { int(n[:-6]):n for n in Rs }
+    Ts = { int(n[:-6]):n for n in Ts }
+    Ss = { int(n[:-6]):n for n in Ss }
+    Ws = { int(n[:-6]):n for n in Ws }
+    assert len(Rs) == len(Ts) == len(Ss) == len(Ws), "Number of params mismatch. Are some txt-files missing?"
+
+    train_mesh_infos = {}
+    test_mesh_infos = {}
+
+    # Loop through all eligible timesteps and parse R,t,s,w files
+    for timestep in wanted_frames:
+        R = Rs[timestep]
+        T = Ts[timestep]
+        S = Ss[timestep]
+        W = Ws[timestep]
+
+        timestep_dict = {}
+        with open(os.path.join(params_path, R)) as f:
+            euler_angles = torch.tensor([float(x.strip()) for x in f.readlines()])
+            timestep_dict['rotation'] = euler_angles
+            assert len(euler_angles) == 3
+
+        with open(os.path.join(params_path, T)) as f:
+            translation = torch.tensor([float(x.strip()) for x in f.readlines()])
+            timestep_dict['translation'] = translation
+            assert len(translation) == 3
+
+        with open(os.path.join(params_path, S)) as f:
+            scale = torch.tensor([float(x.strip()) for x in f.readlines()])
+            timestep_dict['scale'] = scale
+            assert len(scale) == 3
+
+        with open(os.path.join(params_path, W)) as f:
+            bs_weights = torch.tensor([float(x.strip()) for x in f.readlines()])
+            timestep_dict['bs_weights'] = bs_weights
+            assert len(bs_weights) == 52
+
+        if timestep in train_frames:
+            train_mesh_infos[timestep] = timestep_dict
+        if timestep in test_frames:
+            test_mesh_infos[timestep] = timestep_dict
+
+    return train_mesh_infos, test_mesh_infos
+
+
 def readSceneInfoForScannerWB(source_path, images_folder_name, centroid, rescale_factor, val_cam_ids, train_frames, test_frames, eval):
     train_cam_infos, val_cam_infos, test_cam_infos = readWBCamerasFromXML(source_path, images_folder_name,
                                                                           "cameras.xml",
                                                                           centroid, rescale_factor, 
                                                                           val_cam_ids, train_frames, test_frames, eval)
-    # todo 25.9.24: Double check if correct here
-    nerf_normalization = getNerfppNormHylec(train_cam_infos)
+
+    train_mesh_params, test_mesh_params = readMeshParamsForFrames(source_path, train_frames, test_frames, eval)
+
+    nerf_normalization = getNerfppNorm(train_cam_infos)
 
     scene_info = SceneInfo(point_cloud=None,
                            train_cameras=train_cam_infos,
                            val_cameras=val_cam_infos,
                            test_cameras=test_cam_infos,
                            nerf_normalization=nerf_normalization,
+                           train_meshes=train_mesh_params,
+                           test_meshes=test_mesh_params,
                            ply_path=None)
     return scene_info
 

@@ -24,12 +24,11 @@ from arguments import ModelParams, PipelineParams, OptimizationParams
 from gaussian_renderer import render, network_gui
 from lpipsPyTorch import lpips
 from mesh_renderer import NVDiffRenderer
-from scene import Scene, GaussianModel
+from scene import Scene
 from scene.wb_gaussian_model import WBGaussianModel
 from utils.general_utils import safe_state
 from utils.image_utils import psnr, error_map
 from utils.loss_utils import l1_loss, ssim
-from utils.camera_utils import camera2miniCam
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -44,7 +43,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         gaussians = WBGaussianModel(dataset.center_and_scale, dataset.sh_degree)
         mesh_renderer = NVDiffRenderer()
     else:
-        gaussians = GaussianModel(dataset.sh_degree)
+        raise Exception("please use --bind-to-mesh flag")
     scene = Scene(dataset, gaussians)
     # gaussians.save_ply_for_SIBR(f"{dataset.model_path}/_init_gaussians.ply", scene, render_debug_origin=True)
     gaussians.training_setup(opt)

@@ -6,9 +6,10 @@
 # is strictly prohibited.
 #
 
-import torch
-import numpy as np
 from pathlib import Path
+
+import numpy as np
+import torch
 from roma import rotmat_to_unitquat, quat_xyzw_to_wxyz
 
 from utils.graphics_utils import compute_face_orientation
@@ -23,60 +24,30 @@ class WBGaussianModel(GaussianModel):
         self.wb_model = WBModel(center_and_scale).cuda()
 
         # needed for camera repositioning
+        self.center_and_scale = center_and_scale
         self.raw_mesh_centroid = self.wb_model.raw_mesh_centroid
         self.rescale_factor = self.wb_model.rescale_factor
 
-        # needed for viewer gui
-        self.num_timesteps = self.wb_model.num_timesteps
-        self.min_timestep = self.wb_model.start_timestep
-        self.max_timestep = self.wb_model.end_timestep
-
-        self.verts = list(self.wb_model.timestep_to_mesh_dict.values())[0]
+        self.verts = None
         self.verts_uvs = self.wb_model.verts_uvs
         self.faces = self.wb_model.faces
         self.faces_uvs = self.wb_model.faces_uvs
         self.texture = self.wb_model.texture
-
-        T = self.num_timesteps
-
-        # create model params to be saved for model reloading
-        self.model_params = {
-            'center_and_scale': torch.tensor(int(center_and_scale)),
-            'rotation': torch.zeros([T, 3]),
-            'translation': torch.zeros([T, 3]),
-            # 'static_offset': torch.zeros_like(self.verts).cuda(),
-        }
-
-        for k, v in self.flame_param.items():
-            self.flame_param[k] = v.float().cuda()
 
         # binding is initialized once the mesh topology is known
         if self.binding is None:
             self.binding = torch.arange(len(self.wb_model.faces)).cuda()
             self.binding_counter = torch.ones(len(self.wb_model.faces), dtype=torch.int32).cuda()
 
-    def training_setup(self, training_args):
-        super().training_setup(training_args)
-
-        self.model_params['rotation'].requires_grad = True
-        param_rotation = {'params': [self.model_params['rotation']], 'lr': training_args.flame_pose_lr, "name": "rotation"}
-        self.optimizer.add_param_group(param_rotation)
-
-        self.model_params['translation'].requires_grad = True
-        param_translation = {'params': [self.model_params['translation']], 'lr': training_args.flame_trans_lr, "name": "translation"}
-        self.optimizer.add_param_group(param_translation)
-
-        # # make static offset learnable
-        # self.model_params['static_offset'].requires_grad = True
-        # param_static_offset = {'params': [self.model_params['static_offset']], 'lr': 1e-6, "name": "static_offset"}
-        # self.optimizer.add_param_group(param_static_offset)
 
     def select_mesh_by_timestep(self, timestep, original=False):
         self.timestep = timestep
 
-        verts = self.wb_model(timestep=timestep,
-                            roatation=self.model_params['rotation'],
-                            translation=self.model_params['translation'])
+        verts = self.wb_model(rotation=self.model_params['rotation'][timestep],
+                            translation=self.model_params['translation'][timestep],
+                            scale=self.model_params['scale'][timestep],
+                            blendshape_weights=self.model_params['bs_weights'][timestep],
+        )
         
         self.update_mesh_properties(verts)
 
@@ -110,13 +81,62 @@ class WBGaussianModel(GaussianModel):
         np.savez(str(npz_path), **params)
 
     def load_meshes(self, train_meshes, test_meshes, tgt_train_meshes, tgt_test_meshes):
-        # meshes = {**train_meshes, **test_meshes}
-        # tgt_meshes = {**tgt_train_meshes, **tgt_test_meshes}
-        # print("len(meshes):", len(meshes))
-        # print("len(tgt)   :", len(tgt_meshes))
-        # pose_meshes = meshes if len(tgt_meshes) == 0 else tgt_meshes
-        # print("len(pose)  :", len(pose_meshes))
-        
-        # self.num_timesteps = max(pose_meshes) + 1  # required by viewers and training view when evaluating test and val data
-        # print("self.num_timesteps", self.num_timesteps)
-        return
+        meshes = {**train_meshes, **test_meshes}
+
+        # needed for viewer gui
+        self.num_timesteps = len(meshes)
+        self.min_timestep = torch.min(torch.tensor([int(k) for k in meshes.keys()]))
+        self.max_timestep = torch.max(torch.tensor([int(k) for k in meshes.keys()]))
+
+        T = self.max_timestep + 1
+        print("Max timestep", T)
+
+        # create model params to be saved for model reloading
+        # if train and test frames are not continuous (have gaps) the tensor entries are 0s
+        self.model_params = {
+            'center_and_scale': torch.tensor(int(self.center_and_scale)),
+            'rotation': torch.zeros([T, 3]),
+            'translation': torch.zeros([T, 3]),
+            'scale': torch.ones([T, 3]),
+            'bs_weights': torch.zeros([T, list(meshes.values())[0]['bs_weights'].shape[0]]),
+            # 'static_offset': torch.zeros_like(self.verts).cuda(),
+        }
+
+        for timestep, mesh in meshes.items():
+            self.model_params['rotation'][timestep] = mesh['rotation'].clone()
+            self.model_params['translation'][timestep] = mesh['translation'].clone()
+            self.model_params['scale'][timestep] = mesh['scale'].clone()
+            self.model_params['bs_weights'][timestep] = mesh['bs_weights'].clone()
+
+        for k, v in self.model_params.items():
+            self.model_params[k] = v.float().cuda()
+
+    def training_setup(self, training_args):
+        super().training_setup(training_args)
+
+        # rotation
+        self.model_params['rotation'].requires_grad = True
+        param_rotation = {'params': [self.model_params['rotation']], 'lr': training_args.flame_pose_lr, "name": "rotation"}
+        self.optimizer.add_param_group(param_rotation)
+
+        # translation
+        self.model_params['translation'].requires_grad = True
+        param_translation = {'params': [self.model_params['translation']], 'lr': training_args.flame_trans_lr,
+                             "name": "translation"}
+        self.optimizer.add_param_group(param_translation)
+
+        # scale
+        self.model_params['scale'].requires_grad = True
+        param_translation = {'params': [self.model_params['scale']], 'lr': training_args.flame_pose_lr,
+                             "name": "scale"}
+        self.optimizer.add_param_group(param_translation)
+
+        # expression
+        self.model_params['bs_weights'].requires_grad = True
+        param_expr = {'params': [self.model_params['bs_weights']], 'lr': training_args.flame_expr_lr, "name": "bs_weights"}
+        self.optimizer.add_param_group(param_expr)
+
+        # # make static offset learnable
+        # self.model_params['static_offset'].requires_grad = True
+        # param_static_offset = {'params': [self.model_params['static_offset']], 'lr': 1e-6, "name": "static_offset"}
+        # self.optimizer.add_param_group(param_static_offset)
