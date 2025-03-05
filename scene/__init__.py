@@ -13,7 +13,7 @@ import json
 import os
 import random
 from copy import deepcopy
-from typing import Union, List
+from typing import List
 
 import numpy as np
 import torch
@@ -24,6 +24,7 @@ from scene.cameras import Camera
 from scene.dataset_readers import sceneLoadTypeCallbacks
 from scene.flame_gaussian_model import FlameGaussianModel
 from scene.gaussian_model import GaussianModel
+from scene.wb_gaussian_model import WBGaussianModel
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
 from utils.general_utils import PILtoTorch
 from utils.system_utils import searchForMaxIteration
@@ -73,7 +74,7 @@ class Scene:
 
     gaussians : GaussianModel
 
-    def __init__(self, args : ModelParams, gaussians : Union[GaussianModel, FlameGaussianModel], load_iteration=None, shuffle=True, resolution_scales=[1.0]):
+    def __init__(self, args : ModelParams, gaussians : WBGaussianModel, load_iteration=None, shuffle=True, resolution_scales=[1.0]):
         """b
         :param path: Path to colmap scene main folder.
         """

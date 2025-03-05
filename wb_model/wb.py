@@ -1,24 +1,26 @@
 # from .lbs import lbs, vertices2landmarks, blend_shapes, vertices2joints
 import os
-import re
 
 import numpy as np
 import torch
 import torch.nn as nn
-from tqdm import tqdm
 from PIL import Image
-from utils.general_utils import print_triangle_area_info
+from torch import einsum
+
+import utils.pytorch3d
 
 try:
     from pytorch3d.io import load_obj
 except ImportError:
     from utils.pytorch3d_load_obj import load_obj
 
-WB_HEAD_BASE_MESH_PATH = "wb_model/assets/0_head_foundational.obj"
-WB_EYES_BASE_MESH_PATH = "wb_model/assets/0_eyes_foundational.obj"
-WB_MESH_FOR_CENTERING_PATH = "wb_model/assets/4_head.obj"
-WB_MESHES_PATH = "wb_model/assets/"
-WB_HEAD_MESHES_NAME_FILTER_PATTERN="([0-9]+)_head\.obj"
+ROOT = "/home/lio/PycharmProjects/data/scanner_wb/video"
+WB_HEAD_BASE_MESH_PATH     = ROOT + "/meshes_weights/0_head_nicolas_neutral.obj"
+WB_EYES_BASE_MESH_PATH     = ROOT + "/meshes_weights/0_eyes_nicolas_neutral.obj"
+WB_MESH_FOR_CENTERING_PATH = ROOT + "/meshes_weights/4_head.obj"
+WB_BLENDSHAPES_PATH        = ROOT + "/bs" #"wb_model/assets/"
+
+WB_FRAME_PARAMS_PATH       = "([0-9]+)_head\.obj"
 WB_EYES_MESHES_NAME_FILTER_PATTERN="([0-9]+)_eyes\.obj"
 WB_TEXTURE_PATH = "wb_model/assets/skin_basecolor.png"
 TARGET_HEIGHT = 0.34316921 # determined from flame base model height, used to rescale wb mesh
@@ -43,99 +45,95 @@ class WBModel(nn.Module):
             wb_head_base_mesh_path=WB_HEAD_BASE_MESH_PATH,
             wb_eyes_base_mesh_path=WB_EYES_BASE_MESH_PATH,
             wb_mesh_for_centering_path=WB_MESH_FOR_CENTERING_PATH,
-            wb_meshes_path=WB_MESHES_PATH,
-            wb_head_meshes_name_filter_pattern=WB_HEAD_MESHES_NAME_FILTER_PATTERN,
-            wb_eyes_meshes_name_filter_pattern=WB_EYES_MESHES_NAME_FILTER_PATTERN,
             wb_texture_path=WB_TEXTURE_PATH,
-            target_height=TARGET_HEIGHT
+            target_height=TARGET_HEIGHT,
+            wb_blendshapes_path=WB_BLENDSHAPES_PATH,
     ):
-        """
-        Initializes the class with paths and filters for loading meshes.
 
-        Args:
-            wb_base_mesh_path (str): Path to the base mesh file.
-            wb_meshes_path (str): Path to the directory containing the mesh files.
-            wb_meshes_name_filter_pattern (str): Regex pattern to filter out wanted mesh files where first regex group locates timestep number.
-        """
         super(WBModel, self).__init__()
 
+        ### VERTS & FACES - TEMPLATE ###
         # Get face info from base meshes. Faces do not change throughout training and can be buffered
-        head_verts, head_faces, head_aux = load_obj(wb_head_base_mesh_path, load_textures=False)
-        _, eyes_faces, eyes_aux = load_obj(wb_eyes_base_mesh_path, load_textures=False) 
-        
-        # for mesh centering and rescaling to approx setup like niessner 
-        ## must not be the template because it is positioned differently from all n_head.objs which are used during training.
-        ## thus its vertices are useless here
-        vs, _, _ = load_obj(wb_mesh_for_centering_path, load_textures=False)
-        
-        self.raw_mesh_centroid = torch.zeros(3)
-        self.rescale_factor = 1
-        if center_and_scale:
-            print("Calculating vector for centering and rescaling...")
-            self.raw_mesh_centroid = torch.mean(vs, axis=0, keepdims=False)
-            ys = vs[:,1]
-            min_y = float(torch.min(ys))
-            max_y = float(torch.max(ys))
-            height = max_y - min_y
-            self.rescale_factor = target_height / height    
-        # self.rescale_factor = 1
-        print("self.raw_mesh_centroid", self.raw_mesh_centroid)
-        print("self.rescale_factor", self.rescale_factor)
-
+        neutral_head_verts, neutral_head_faces, neutral_head_aux = load_obj(wb_head_base_mesh_path, load_textures=False)
+        neutral_eyes_verts, neutral_eyes_faces, neutral_eyes_aux = load_obj(wb_eyes_base_mesh_path, load_textures=False)
+        self.register_buffer("v_neutral", neutral_head_verts, persistent=False)
 
         # stack eyes faces under head faces and adjust indices
-        faces = torch.vstack((head_faces.verts_idx, eyes_faces.verts_idx + head_verts.shape[0]))
+        faces = torch.vstack((neutral_head_faces.verts_idx, neutral_eyes_faces.verts_idx + neutral_head_verts.shape[0]))
+        self.register_buffer("verts", torch.vstack((neutral_head_verts, neutral_eyes_verts)), persistent=False)
         self.register_buffer("faces", faces, persistent=False)
 
+        ### VERTS - BLENDSHAPES ###
+        shapes, self.shapes_names = self.load_delta_blendshapes(neutral_head_verts, wb_blendshapes_path)
+        self.register_buffer("shapes", shapes, persistent=False)
+
+        ### TEXTURE ###
         self.texture = load_texture(wb_texture_path)
+        self.verts_uvs = torch.vstack((neutral_head_aux.verts_uvs, neutral_eyes_aux.verts_uvs))
+        self.faces_uvs = torch.vstack((neutral_head_faces.textures_idx, neutral_eyes_faces.textures_idx))
 
-        self.verts_uvs = torch.vstack((head_aux.verts_uvs, eyes_aux.verts_uvs))
-        self.faces_uvs = torch.vstack((head_faces.textures_idx, eyes_faces.textures_idx))
+        self.raw_mesh_centroid = torch.zeros(3)
+        self.rescale_factor = 1
 
+    def load_delta_blendshapes(self, neutral, blendshapes_path, blendshape_order_file="blendshapes_order.txt"):
+        shapes = []
+        shapes_names = []
+        with open(os.path.join(blendshapes_path, blendshape_order_file)) as f:
+            for i, blendshape_name in enumerate(f.readlines()):
+                blendshape_file_name = blendshape_name.strip() + ".obj"
+                blendshape_file_path = os.path.join(blendshapes_path, blendshape_file_name)
+                try:
+                    shape_verts, _, _ = load_obj(blendshape_file_path, load_textures=False)
+                    if neutral is not None:
+                        shape_verts = shape_verts - neutral
+                    shapes.append(shape_verts.unsqueeze(0))
+                    shapes_names.append(blendshape_name)
+                except Exception as e:
+                    assert False, f"Could not read {blendshape_file_path}\n{e}"
+        return torch.vstack(shapes), shapes_names
 
-        # Load each head.obj 
-        head_file_pattern = re.compile(wb_head_meshes_name_filter_pattern)
-        head_meshes = self.load_timestep2mesh_dict(wb_meshes_path, head_file_pattern, "heads")
+    def load_blendshapes(self, neutral, blendshapes_path, blendshape_order_file="blendshapes_order.txt"):
+        return self.load_delta_blendshapes(None, blendshapes_path, blendshape_order_file)
 
-        # Load each eyes.obj 
-        eyes_file_pattern = re.compile(wb_eyes_meshes_name_filter_pattern)
-        eyes_meshes = self.load_timestep2mesh_dict(wb_meshes_path, eyes_file_pattern, "eyes")
-        
-        # Merge dicts (eyes and heads)
-        for t, verts in tqdm(head_meshes.items(), desc="Merging meshes...", unit="merges"):         
-            full_verts = torch.vstack((verts, eyes_meshes[t]))
-            # center
-            full_verts = full_verts - self.raw_mesh_centroid
-            # rescale
-            full_verts = self.rescale_factor * full_verts 
-            # move all mesh vert tensors to gpu
-            self.timestep_to_mesh_dict[t] = full_verts.unsqueeze(0).float().cuda()
+    def forward(self, translation, rotation, scale, blendshape_weights):
+        # apply blendshapes to head
+        print("=========== FORWARD =============================")
+        print(">>> params:")
+        print("translation", translation.shape)
+        print("rotation", rotation.shape)
+        print("scale", scale.shape)
+        print("blendshape_weights", blendshape_weights.shape)
+        print("===")
+        print("self.v_neutral:", self.v_neutral.shape)
+        print("self.shapes:", self.shapes.shape)
 
+        # DBS = DELTA_BLENDSHAPES
+        DBS = self.v_neutral + einsum("w,wvc->vc", blendshape_weights, self.shapes)
+        print("DBS", DBS.shape)
 
-        print_triangle_area_info(self.timestep_to_mesh_dict[4].cpu().squeeze(), faces.cpu())
-        self.num_timesteps = len(self.timestep_to_mesh_dict.values())
-        self.start_timestep = min(self.timestep_to_mesh_dict.keys())
-        self.end_timestep = max(self.timestep_to_mesh_dict.keys())
+        # rotation und translation durchführen
+        # (LBS - mean(LBS)) * R + mean(LBS) + t
+        # mit scaling? (LBS - mean(LBS)) * S * R + mean(LBS) + t
+        c = torch.mean(DBS, dim=0)
+        print("c", c)
+        centered = (DBS - c)
+        print("centered", centered.shape)
+        scaled = centered * scale
+        print("scaled", scaled.shape)
 
-    def load_timestep2mesh_dict(self, meshes_path, pattern, unit=""):
-        mesh_dict = {}
-        mesh_file_names = sorted([f for f in os.listdir(meshes_path) if pattern.match(f)])
+        rot_mat = utils.pytorch3d.euler_angles_to_matrix(rotation, convention="XYZ")
+        print("rot_mat", rot_mat.shape)
+        rotated = scaled @ rot_mat
+        print("rotated", rotated.shape)
 
-        # timestep -> mesh vertices
-        self.timestep_to_mesh_dict = {}
-        for mesh_file in tqdm(sorted(mesh_file_names, key= lambda x: int(pattern.match(x).group(1))), desc=f"Loading {unit}...", unit=f"{unit}"):
-            full_path = os.path.join(meshes_path, mesh_file)
+        # für augen und head
 
-            match = pattern.match(mesh_file)
-            timestep = int(match.group(1)) if match else None
+        # kopf und augen zusammenfügen
 
-            verts, _, _ = load_obj(full_path, load_textures=False)
-            mesh_dict[timestep] = verts
-        return mesh_dict
+        raise Exception("JAA")
+        return
 
-    def forward(self, timestep, rotation, translation):
-        return self.timestep_to_mesh_dict[timestep]
 
 
 if __name__ == '__main__':
-    wb_model = WBModel()
+    wb_model = WBModel(False)
