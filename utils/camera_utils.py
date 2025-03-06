@@ -11,10 +11,12 @@
 import string
 
 import numpy as np
+import torch
 from tqdm import tqdm
 
 from scene.cameras import Camera, MiniCam
 from utils.graphics_utils import fov2focal
+from utils.pytorch3d_load_obj import save_obj
 
 WARNED = False
 
@@ -105,3 +107,50 @@ def camera2miniCam(camera: Camera):
         full_proj_transform=camera.full_proj_transform,
         timestep=camera.timestep,
     )
+
+def save_cams_as_mesh(cameras: [Camera], scale=0.025):
+
+    model_verts = np.array([[1, 1, 1], #0
+                            [1, 1, -1],
+                            [1, -1, 1], #2
+                            [1, -1, -1],
+                            [-1, 1, 1], #4
+                            [-1, 1, -1],
+                            [-1, -1, 1], # 6
+                            [-1, -1, -1],
+                            [0, 0, 5] #8
+                            ]) * scale
+    n_model_verts = model_verts.shape[0]
+
+    model_faces = np.array([
+        [4, 6, 2], [4, 2, 0],
+        [1, 3, 7], [1, 7, 5],
+        [5, 7, 6], [5, 6, 4],
+        [0, 2, 3], [0, 3, 1],
+        [4, 5, 1], [4, 1, 0],
+        [6, 7, 3], [6, 3, 2],
+        [8, 0, 2], [8, 2, 6], [8, 4, 6], [8,4,0]
+    ])
+
+    camera_verts=[]
+    camera_faces=[]
+    for i, c in enumerate(cameras):
+        t = c.camera_center.numpy().reshape(1,3)
+
+        w2c = c.world_view_transform
+        R = np.linalg.inv(w2c)[:3,:3] # rot of c2w
+
+        vs = (model_verts @ R) + t
+
+        camera_verts.append(vs)
+        camera_faces.append(model_faces + i * np.array([n_model_verts,n_model_verts,n_model_verts]))
+
+    # Convert lists to proper NumPy arrays
+    camera_verts = np.vstack(camera_verts)  # Stack along the first axis
+    camera_faces = np.vstack(camera_faces)  # Stack face indices
+
+    # Convert to tensors
+    camera_verts = torch.from_numpy(camera_verts)
+    camera_faces = torch.from_numpy(camera_faces)
+
+    save_obj("./output/camera_models.obj", verts=camera_verts, faces= camera_faces)

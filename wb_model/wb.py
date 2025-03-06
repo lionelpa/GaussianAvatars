@@ -12,12 +12,14 @@ import utils.pytorch3d
 try:
     from pytorch3d.io import load_obj
 except ImportError:
-    from utils.pytorch3d_load_obj import load_obj
+    from utils.pytorch3d_load_obj import load_obj, save_obj
 
 ROOT = "/home/lio/PycharmProjects/data/scanner_wb/video"
-WB_HEAD_BASE_MESH_PATH     = ROOT + "/meshes_weights/0_head_nicolas_neutral.obj"
-WB_EYES_BASE_MESH_PATH     = ROOT + "/meshes_weights/0_eyes_nicolas_neutral.obj"
-WB_MESH_FOR_CENTERING_PATH = ROOT + "/meshes_weights/4_head.obj"
+# WB_HEAD_BASE_MESH_PATH     = ROOT + "/meshes_weights/0_head_nicolas_neutral.obj"
+# WB_EYES_BASE_MESH_PATH     = ROOT + "/meshes_weights/0_eyes_nicolas_neutral.obj"
+WB_HEAD_BASE_MESH_PATH     = ROOT + "/smooth/0_head_nicolas_neutral.obj"
+WB_EYES_BASE_MESH_PATH     = ROOT + "/smooth/0_eyes_nicolas_neutral.obj"
+WB_MESH_FOR_CENTERING_PATH = ROOT + "/smooth/4_head.obj"
 WB_BLENDSHAPES_PATH        = ROOT + "/bs" #"wb_model/assets/"
 
 WB_FRAME_PARAMS_PATH       = "([0-9]+)_head\.obj"
@@ -87,7 +89,7 @@ class WBModel(nn.Module):
                     if neutral is not None:
                         shape_verts = shape_verts - neutral
                     shapes.append(shape_verts.unsqueeze(0))
-                    shapes_names.append(blendshape_name)
+                    shapes_names.append(blendshape_name.strip())
                 except Exception as e:
                     assert False, f"Could not read {blendshape_file_path}\n{e}"
         return torch.vstack(shapes), shapes_names
@@ -95,41 +97,40 @@ class WBModel(nn.Module):
     def load_blendshapes(self, neutral, blendshapes_path, blendshape_order_file="blendshapes_order.txt"):
         return self.load_delta_blendshapes(None, blendshapes_path, blendshape_order_file)
 
-    def forward(self, translation, rotation, scale, blendshape_weights):
+    def forward(self, translation, rotation, scale, blendshape_weights, timestep):
         # apply blendshapes to head
-        print("=========== FORWARD =============================")
-        print(">>> params:")
-        print("translation", translation.shape)
-        print("rotation", rotation.shape)
-        print("scale", scale.shape)
-        print("blendshape_weights", blendshape_weights.shape)
-        print("===")
-        print("self.v_neutral:", self.v_neutral.shape)
-        print("self.shapes:", self.shapes.shape)
+        # print("=========== FORWARD =============================")
+        # print(">>> params:")
+        # print("translation", translation)
+        # print("rotation", rotation)
+        # print("scale", scale)
+        # print("blendshape_weights", blendshape_weights)
+        # print("===")
+        # print("self.v_neutral:", self.v_neutral.shape)
+        # print("self.shapes:", self.shapes.shape)
+        #
+        # for i in range(blendshape_weights.shape[0]):
+        #     print(f"{i} {self.shapes_names[i]}\t{float(blendshape_weights[i])}")
 
         # DBS = DELTA_BLENDSHAPES
         DBS = self.v_neutral + einsum("w,wvc->vc", blendshape_weights, self.shapes)
-        print("DBS", DBS.shape)
 
         # rotation und translation durchführen
         # (LBS - mean(LBS)) * R + mean(LBS) + t
         # mit scaling? (LBS - mean(LBS)) * S * R + mean(LBS) + t
         c = torch.mean(DBS, dim=0)
-        print("c", c)
-        centered = (DBS - c)
-        print("centered", centered.shape)
+        centered = DBS - c
         scaled = centered * scale
-        print("scaled", scaled.shape)
 
         rot_mat = utils.pytorch3d.euler_angles_to_matrix(rotation, convention="XYZ")
-        print("rot_mat", rot_mat.shape)
         rotated = scaled @ rot_mat
-        print("rotated", rotated.shape)
+        repositioned = rotated + c
+        final = repositioned + translation
 
         # für augen und head
 
         # kopf und augen zusammenfügen
-
+        save_obj(f"./output/blended_timestep_{timestep}_test_smooth_scaled.obj", verts=final, faces=self.faces)
         raise Exception("JAA")
         return
 

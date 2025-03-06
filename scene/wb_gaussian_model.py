@@ -43,10 +43,12 @@ class WBGaussianModel(GaussianModel):
     def select_mesh_by_timestep(self, timestep, original=False):
         self.timestep = timestep
 
-        verts = self.wb_model(rotation=self.model_params['rotation'][timestep],
-                            translation=self.model_params['translation'][timestep],
-                            scale=self.model_params['scale'][timestep],
-                            blendshape_weights=self.model_params['bs_weights'][timestep],
+        verts = self.wb_model(
+            timestep=timestep,
+            rotation=self.model_params['rotation'][timestep],
+            translation=self.model_params['translation'][timestep],
+            scale=self.model_params['scale'][timestep],
+            blendshape_weights=self.model_params['bs_weights'][timestep],
         )
         
         self.update_mesh_properties(verts)
