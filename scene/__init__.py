@@ -25,7 +25,7 @@ from scene.dataset_readers import sceneLoadTypeCallbacks
 from scene.flame_gaussian_model import FlameGaussianModel
 from scene.gaussian_model import GaussianModel
 from scene.wb_gaussian_model import WBGaussianModel
-from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
+from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON, save_cams_as_mesh
 from utils.general_utils import PILtoTorch
 from utils.system_utils import searchForMaxIteration
 
@@ -147,7 +147,10 @@ class Scene:
         if gaussians.binding != None:
             self.gaussians.load_meshes(scene_info.train_meshes, scene_info.test_meshes, 
                                        scene_info.tgt_train_meshes, scene_info.tgt_test_meshes)
-        
+
+        save_cams_as_mesh(
+            self.getTrainCameras().cameras + self.getTestCameras().cameras + self.getValCameras().cameras)
+
         # create gaussians
         if self.loaded_iter:
             self.gaussians.load_ply(

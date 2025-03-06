@@ -109,7 +109,8 @@ def getNerfppNormHylec(cam_info):
 
 
 def readMeshParamsForFrames(source_path, train_frames, test_frames, eval):
-    params_path = os.path.join(source_path, "meshes_weights")
+    # params_path = os.path.join(source_path, "meshes_weights")
+    params_path = os.path.join(source_path, "smooth")
     wanted_frames = train_frames.union(test_frames) if eval else train_frames
     Rs = [f"{f}_R.txt" for f in wanted_frames] # naming convention is {frame}_R.txt
     Ts = [f"{f}_t.txt" for f in wanted_frames] # naming convention is {frame}_t.txt
