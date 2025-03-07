@@ -270,6 +270,10 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
         tb_writer.add_scalar('train_loss_patches/total_loss', losses['total'].item(), iteration)
         tb_writer.add_scalar('iter_time', elapsed, iteration)
 
+        tb_writer.add_scalar('transform/rotation', torch.linalg.vector_norm(scene.gaussians.model_params['rotation'].sum(dim=0)))
+        tb_writer.add_scalar('transform/scale', torch.linalg.vector_norm(scene.gaussians.model_params['scale'].sum(dim=0)))
+        tb_writer.add_scalar('transform/translation', torch.linalg.vector_norm(scene.gaussians.model_params['translation'].sum(dim=0)))
+
     # Report test and samples of training set
     if iteration in testing_iterations:
         print("[ITER {}] Evaluating".format(iteration))

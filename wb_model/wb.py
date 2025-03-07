@@ -5,14 +5,12 @@ import re
 import numpy as np
 import torch
 import torch.nn as nn
-from tqdm import tqdm
 from PIL import Image
-from utils.general_utils import print_triangle_area_info
+from tqdm import tqdm
 
-try:
-    from pytorch3d.io import load_obj
-except ImportError:
-    from utils.pytorch3d_load_obj import load_obj
+from utils.general_utils import print_triangle_area_info
+from utils.pytorch3d import euler_angles_to_matrix
+from utils.pytorch3d_load_obj import load_obj
 
 WB_HEAD_BASE_MESH_PATH = "wb_model/assets/0_head_foundational.obj"
 WB_EYES_BASE_MESH_PATH = "wb_model/assets/0_eyes_foundational.obj"
@@ -61,6 +59,7 @@ class WBModel(nn.Module):
 
         # Get face info from base meshes. Faces do not change throughout training and can be buffered
         head_verts, head_faces, head_aux = load_obj(wb_head_base_mesh_path, load_textures=False)
+        self.n_head_verts = head_verts.shape[0]
         _, eyes_faces, eyes_aux = load_obj(wb_eyes_base_mesh_path, load_textures=False) 
         
         # for mesh centering and rescaling to approx setup like niessner 
@@ -109,7 +108,7 @@ class WBModel(nn.Module):
             # rescale
             full_verts = self.rescale_factor * full_verts 
             # move all mesh vert tensors to gpu
-            self.timestep_to_mesh_dict[t] = full_verts.unsqueeze(0).float().cuda()
+            self.timestep_to_mesh_dict[t] = full_verts.float().cuda()
 
 
         print_triangle_area_info(self.timestep_to_mesh_dict[4].cpu().squeeze(), faces.cpu())
@@ -131,10 +130,47 @@ class WBModel(nn.Module):
 
             verts, _, _ = load_obj(full_path, load_textures=False)
             mesh_dict[timestep] = verts
+            break
         return mesh_dict
 
-    def forward(self, timestep):
-        return self.timestep_to_mesh_dict[timestep]
+    def forward(self, timestep, rotation, scale, translation):
+        '''
+            rotation, scale, translation are all tensor 3
+        '''
+        # print("timestep", timestep)
+        # print("scale", scale)
+        # print("translation", translation)
+        # print("rotation", rotation)
+
+        v = self.timestep_to_mesh_dict[timestep]
+        # mean only on head not on head+eyes
+        mean = torch.mean(v[:self.n_head_verts], dim=0)
+
+        R = euler_angles_to_matrix(rotation, convention="XYZ")
+        # print("R", R)
+        # print("mean", mean)
+        # print("verts", v.shape)
+        # print("verts-mean",(v - mean).shape)
+        # print("scale* verts-mean",(scale * (v - mean)).shape)
+        # print((scale * (verts - mean)).shape)
+        # print(R.unsqueeze(0).shape)
+        # transformed = torch.bmm((scale * (verts - mean)), R.unsqueeze(0))[0] + mean + translation
+
+        # save_obj("./output/###1start.obj", v, self.faces)
+        # centered = v - mean
+        # save_obj("./output/###2centered.obj", centered, self.faces)
+        # scaled = scale * centered
+        # save_obj("./output/###3scaled.obj", scaled, self.faces)
+        # rotated = scaled @ R
+        # save_obj("./output/###4rotated.obj",rotated, self.faces)
+        # recentered = rotated + mean
+        # save_obj("./output/###5recentered.obj",recentered, self.faces)
+        # final = recentered + translation
+        # save_obj("./output/###6final.obj",final, self.faces)
+
+        transformed = (scale * (v - mean)) @ R + mean + translation
+        # save_obj("./output/###.obj", transformed, self.faces)
+        return transformed
 
 
 if __name__ == '__main__':
