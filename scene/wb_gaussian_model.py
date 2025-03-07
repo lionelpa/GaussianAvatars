@@ -49,6 +49,7 @@ class WBGaussianModel(GaussianModel):
             translation=self.model_params['translation'][timestep],
             scale=self.model_params['scale'][timestep],
             blendshape_weights=self.model_params['bs_weights'][timestep],
+            mean=self.model_params['mean'][timestep],
         )
         
         self.update_mesh_properties(verts)
@@ -101,6 +102,7 @@ class WBGaussianModel(GaussianModel):
             'translation': torch.zeros([T, 3]),
             'scale': torch.ones([T, 3]),
             'bs_weights': torch.zeros([T, list(meshes.values())[0]['bs_weights'].shape[0]]),
+            'mean': torch.ones([T, 3]),
             # 'static_offset': torch.zeros_like(self.verts).cuda(),
         }
 
@@ -109,6 +111,7 @@ class WBGaussianModel(GaussianModel):
             self.model_params['translation'][timestep] = mesh['translation'].clone()
             self.model_params['scale'][timestep] = mesh['scale'].clone()
             self.model_params['bs_weights'][timestep] = mesh['bs_weights'].clone()
+            self.model_params['mean'][timestep] = mesh['mean'].clone()
 
         for k, v in self.model_params.items():
             self.model_params[k] = v.float().cuda()

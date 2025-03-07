@@ -110,18 +110,20 @@ def getNerfppNormHylec(cam_info):
 
 def readMeshParamsForFrames(source_path, train_frames, test_frames, eval):
     # params_path = os.path.join(source_path, "meshes_weights")
-    params_path = os.path.join(source_path, "smooth")
+    params_path = os.path.join(source_path, "smooth_new")
     wanted_frames = train_frames.union(test_frames) if eval else train_frames
     Rs = [f"{f}_R.txt" for f in wanted_frames] # naming convention is {frame}_R.txt
     Ts = [f"{f}_t.txt" for f in wanted_frames] # naming convention is {frame}_t.txt
     Ss = [f"{f}_s.txt" for f in wanted_frames] # naming convention is {frame}_s.txt
     Ws = [f"{f}_w.txt" for f in wanted_frames] # naming convention is {frame}_w.txt
+    means = [f"{f}_mean.txt" for f in wanted_frames] # naming convention is {frame}_w.txt
 
     Rs = { int(n[:-6]):n for n in Rs }
     Ts = { int(n[:-6]):n for n in Ts }
     Ss = { int(n[:-6]):n for n in Ss }
     Ws = { int(n[:-6]):n for n in Ws }
-    assert len(Rs) == len(Ts) == len(Ss) == len(Ws), "Number of params mismatch. Are some txt-files missing?"
+    means = { int(n[:-9]):n for n in means }
+    assert len(Rs) == len(Ts) == len(Ss) == len(Ws) == len(means), "Number of params mismatch. Are some txt-files missing?"
 
     train_mesh_infos = {}
     test_mesh_infos = {}
@@ -132,6 +134,7 @@ def readMeshParamsForFrames(source_path, train_frames, test_frames, eval):
         T = Ts[timestep]
         S = Ss[timestep]
         W = Ws[timestep]
+        mean = means[timestep]
 
         timestep_dict = {}
         with open(os.path.join(params_path, R)) as f:
@@ -153,6 +156,11 @@ def readMeshParamsForFrames(source_path, train_frames, test_frames, eval):
             bs_weights = torch.tensor([float(x.strip()) for x in f.readlines()])
             timestep_dict['bs_weights'] = bs_weights
             assert len(bs_weights) == 52
+
+        with open(os.path.join(params_path, mean)) as f:
+            mean = torch.tensor([float(x.strip()) for x in f.readlines()])
+            timestep_dict['mean'] = mean
+            assert len(mean) == 3
 
         if timestep in train_frames:
             train_mesh_infos[timestep] = timestep_dict
