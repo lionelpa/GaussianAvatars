@@ -45,7 +45,13 @@ class WBGaussianModel(GaussianModel):
     def select_mesh_by_timestep(self, timestep, original=False):
         self.timestep = timestep
 
-        verts = self.wb_model(timestep)
+        verts = self.wb_model(
+            timestep=timestep,
+            rotation=self.model_params['rotation'][timestep],
+            scale=self.model_params['scale'][timestep],
+            translation=self.model_params['translation'][timestep],
+        )
+
         self.update_mesh_properties(verts)
 
     def update_mesh_properties(self, verts):
@@ -84,13 +90,37 @@ class WBGaussianModel(GaussianModel):
         return diff.mean()
 
     def load_meshes(self, train_meshes, test_meshes, tgt_train_meshes, tgt_test_meshes):
-        # meshes = {**train_meshes, **test_meshes}
-        # tgt_meshes = {**tgt_train_meshes, **tgt_test_meshes}
-        # print("len(meshes):", len(meshes))
-        # print("len(tgt)   :", len(tgt_meshes))
-        # pose_meshes = meshes if len(tgt_meshes) == 0 else tgt_meshes
-        # print("len(pose)  :", len(pose_meshes))
-        
-        # self.num_timesteps = max(pose_meshes) + 1  # required by viewers and training view when evaluating test and val data
-        # print("self.num_timesteps", self.num_timesteps)
-        return
+        T = self.max_timestep + 1
+        print("Max timestep", T)
+
+        # create model params to be saved for model reloading
+        # if train and test frames are not continuous (have gaps) the tensor entries are 0s
+        self.model_params = {
+            'rotation': torch.zeros([T, 3]),
+            'translation': torch.zeros([T, 3]),
+            'scale': torch.ones([T, 3]),
+        }
+
+        for k, v in self.model_params.items():
+            self.model_params[k] = v.float().cuda()
+
+    def training_setup(self, training_args):
+        super().training_setup(training_args)
+
+        # rotation
+        self.model_params['rotation'].requires_grad = True
+        param_rotation = {'params': [self.model_params['rotation']], 'lr': training_args.flame_pose_lr,
+                          "name": "rotation"}
+        self.optimizer.add_param_group(param_rotation)
+
+        # translation
+        self.model_params['translation'].requires_grad = True
+        param_translation = {'params': [self.model_params['translation']], 'lr': training_args.flame_trans_lr,
+                             "name": "translation"}
+        self.optimizer.add_param_group(param_translation)
+
+        # scale
+        self.model_params['scale'].requires_grad = True
+        param_translation = {'params': [self.model_params['scale']], 'lr': training_args.flame_pose_lr,
+                             "name": "scale"}
+        self.optimizer.add_param_group(param_translation)
