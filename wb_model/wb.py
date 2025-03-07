@@ -17,9 +17,9 @@ except ImportError:
 ROOT = "/home/lio/PycharmProjects/data/scanner_wb/video"
 # WB_HEAD_BASE_MESH_PATH     = ROOT + "/meshes_weights/0_head_nicolas_neutral.obj"
 # WB_EYES_BASE_MESH_PATH     = ROOT + "/meshes_weights/0_eyes_nicolas_neutral.obj"
-WB_HEAD_BASE_MESH_PATH     = ROOT + "/smooth/0_head_nicolas_neutral.obj"
-WB_EYES_BASE_MESH_PATH     = ROOT + "/smooth/0_eyes_nicolas_neutral.obj"
-WB_MESH_FOR_CENTERING_PATH = ROOT + "/smooth/4_head.obj"
+WB_HEAD_BASE_MESH_PATH     = ROOT + "/smooth_new/0_head_nicolas_neutral.obj"
+WB_EYES_BASE_MESH_PATH     = ROOT + "/smooth_new/0_eyes_nicolas_neutral.obj"
+WB_MESH_FOR_CENTERING_PATH = ROOT + "/smooth_new/4_head.obj"
 WB_BLENDSHAPES_PATH        = ROOT + "/bs" #"wb_model/assets/"
 
 WB_FRAME_PARAMS_PATH       = "([0-9]+)_head\.obj"
@@ -58,7 +58,9 @@ class WBModel(nn.Module):
         # Get face info from base meshes. Faces do not change throughout training and can be buffered
         neutral_head_verts, neutral_head_faces, neutral_head_aux = load_obj(wb_head_base_mesh_path, load_textures=False)
         neutral_eyes_verts, neutral_eyes_faces, neutral_eyes_aux = load_obj(wb_eyes_base_mesh_path, load_textures=False)
-        self.register_buffer("v_neutral", neutral_head_verts, persistent=False)
+        self.register_buffer("head_neutral_v", neutral_head_verts, persistent=False)
+        self.register_buffer("eyes_neutral_v", neutral_eyes_verts, persistent=False)
+        self.register_buffer("full_neutral_v", torch.vstack([neutral_head_verts, neutral_eyes_verts]), persistent=False)
 
         # stack eyes faces under head faces and adjust indices
         faces = torch.vstack((neutral_head_faces.verts_idx, neutral_eyes_faces.verts_idx + neutral_head_verts.shape[0]))
@@ -97,7 +99,14 @@ class WBModel(nn.Module):
     def load_blendshapes(self, neutral, blendshapes_path, blendshape_order_file="blendshapes_order.txt"):
         return self.load_delta_blendshapes(None, blendshapes_path, blendshape_order_file)
 
-    def forward(self, translation, rotation, scale, blendshape_weights, timestep):
+    # def extend_blend_shape_verts_by_eyes(self, blendshapes, neutral_eyes_verts):
+    #     # blendshapes        = B x Vb x 3
+    #     # neutral_eyes_verts =     Ve x 3
+    #     eyes_expanded = neutral_eyes_verts.unsqueeze(0).repeat(blendshapes.shape[0], 1, 1)  # (B, Ve, 3)
+    #     extended_blendshapes = torch.cat([blendshapes, eyes_expanded], dim=1)
+    #     return  extended_blendshapes
+
+    def forward(self, translation, rotation, scale, blendshape_weights, timestep, mean):
         # apply blendshapes to head
         # print("=========== FORWARD =============================")
         # print(">>> params:")
@@ -112,25 +121,39 @@ class WBModel(nn.Module):
         # for i in range(blendshape_weights.shape[0]):
         #     print(f"{i} {self.shapes_names[i]}\t{float(blendshape_weights[i])}")
 
-        # DBS = DELTA_BLENDSHAPES
-        DBS = self.v_neutral + einsum("w,wvc->vc", blendshape_weights, self.shapes)
+        ### DBS = DELTA_BLENDSHAPES
+        # apply only to head
+        # # (necessary because translate by -c depends on head verts only and including eyes would add inaccuracies)
+        DBS = self.head_neutral_v + einsum("w,wvc->vc", blendshape_weights, self.shapes)
+        save_obj(f"./output/A_{timestep}_1_DBS.obj", verts=DBS, faces=self.faces)
+
 
         # rotation und translation durchführen
         # (LBS - mean(LBS)) * R + mean(LBS) + t
-        # mit scaling? (LBS - mean(LBS)) * S * R + mean(LBS) + t
+        # mit scaling: (LBS - mean(LBS)) * S * R + mean(LBS) + t
         c = torch.mean(DBS, dim=0)
         centered = DBS - c
+        save_obj(f"./output/A_{timestep}_2_centered.obj", verts=centered, faces=self.faces)
+
         scaled = centered * scale
+        save_obj(f"./output/A_{timestep}_3_scaled.obj", verts=scaled, faces=self.faces)
+
 
         rot_mat = utils.pytorch3d.euler_angles_to_matrix(rotation, convention="XYZ")
         rotated = scaled @ rot_mat
+        save_obj(f"./output/A_{timestep}_4_rotated.obj", verts=rotated, faces=self.faces)
+
+
         repositioned = rotated + c
+        save_obj(f"./output/A_{timestep}_5_repositioned.obj", verts=repositioned, faces=self.faces)
+
+
         final = repositioned + translation
 
         # für augen und head
 
         # kopf und augen zusammenfügen
-        save_obj(f"./output/blended_timestep_{timestep}_test_smooth_scaled.obj", verts=final, faces=self.faces)
+        save_obj(f"./output/A_{timestep}_6_final.obj", verts=final, faces=self.faces)
         raise Exception("JAA")
         return
 
