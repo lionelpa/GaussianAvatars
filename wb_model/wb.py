@@ -130,7 +130,6 @@ class WBModel(nn.Module):
 
             verts, _, _ = load_obj(full_path, load_textures=False)
             mesh_dict[timestep] = verts
-            break
         return mesh_dict
 
     def forward(self, timestep, rotation, scale, translation):
