@@ -108,7 +108,7 @@ class WBModel(nn.Module):
             # rescale
             full_verts = self.rescale_factor * full_verts 
             # move all mesh vert tensors to gpu
-            self.timestep_to_mesh_dict[t] = full_verts.float().cuda()
+            self.timestep_to_mesh_dict[t] = full_verts.unsqueeze(0).float().cuda()
 
 
         print_triangle_area_info(self.timestep_to_mesh_dict[4].cpu().squeeze(), faces.cpu())
@@ -137,14 +137,15 @@ class WBModel(nn.Module):
             rotation, scale, translation are all tensor 3
         '''
 
-        v = self.timestep_to_mesh_dict[timestep]
+        # originally 1 x V x 3 -> V x 3
+        v = self.timestep_to_mesh_dict[timestep][0]
         # mean only on head not on head+eyes
         mean = torch.mean(v[:self.n_head_verts], dim=0)
         R = euler_angles_to_matrix(rotation, convention="XYZ")
 
         transformed = (scale * (v - mean)) @ R + mean + translation
         # save_obj("./output/###.obj", transformed, self.faces)
-        return transformed
+        return transformed.unsqueeze(0)
 
 
 if __name__ == '__main__':

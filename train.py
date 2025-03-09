@@ -45,7 +45,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     else:
         gaussians = GaussianModel(dataset.sh_degree)
     scene = Scene(dataset, gaussians)
-    gaussians.save_ply_for_SIBR(f"{dataset.model_path}/_init_gaussians.ply", scene, render_debug_origin=True)
+    # gaussians.save_ply_for_SIBR(f"{dataset.model_path}/_init_gaussians.ply", scene, render_debug_origin=True)
     gaussians.training_setup(opt)
 
     if checkpoint:
@@ -270,9 +270,9 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
         tb_writer.add_scalar('train_loss_patches/total_loss', losses['total'].item(), iteration)
         tb_writer.add_scalar('iter_time', elapsed, iteration)
 
-        tb_writer.add_scalar('transform/rotation', torch.linalg.vector_norm(scene.gaussians.model_params['rotation'].sum(dim=0)))
-        tb_writer.add_scalar('transform/scale', torch.linalg.vector_norm(scene.gaussians.model_params['scale'].sum(dim=0)))
-        tb_writer.add_scalar('transform/translation', torch.linalg.vector_norm(scene.gaussians.model_params['translation'].sum(dim=0)))
+        tb_writer.add_scalar('transform/rotation', torch.linalg.vector_norm(scene.gaussians.model_params['mesh_rotation'].sum(dim=0)), iteration)
+        tb_writer.add_scalar('transform/scale', torch.linalg.vector_norm(scene.gaussians.model_params['mesh_scale'].sum(dim=0)), iteration)
+        tb_writer.add_scalar('transform/translation', torch.linalg.vector_norm(scene.gaussians.model_params['mesh_translation'].sum(dim=0)), iteration)
 
     # Report test and samples of training set
     if iteration in testing_iterations:

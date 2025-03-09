@@ -93,7 +93,7 @@ class Scene:
         if os.path.exists(args.source_path):
             scene_info = sceneLoadTypeCallbacks["ScannerWB"](args.source_path, args.images, gaussians.raw_mesh_centroid,
                                                              gaussians.rescale_factor,
-                                                             {8}, set(range(4,401)), set(range(401, 451)), args.eval)
+                                                             {8}, set(range(50,100)), set(range(401, 402)), args.eval)
         # elif os.path.exists(os.path.join(args.source_path, "sparse")):
         #     scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval)
         # elif os.path.exists(os.path.join(args.source_path, "canonical_flame_param.npz")):

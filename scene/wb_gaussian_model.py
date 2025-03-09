@@ -6,6 +6,9 @@
 # is strictly prohibited.
 #
 
+from pathlib import Path
+
+import numpy as np
 import torch
 from roma import rotmat_to_unitquat, quat_xyzw_to_wxyz
 
@@ -47,9 +50,9 @@ class WBGaussianModel(GaussianModel):
 
         verts = self.wb_model(
             timestep=timestep,
-            rotation=self.model_params['rotation'][timestep],
-            scale=self.model_params['scale'][timestep],
-            translation=self.model_params['translation'][timestep],
+            rotation=self.model_params['mesh_rotation'][timestep],
+            scale=self.model_params['mesh_scale'][timestep],
+            translation=self.model_params['mesh_translation'][timestep],
         )
 
         self.update_mesh_properties(verts)
@@ -96,9 +99,9 @@ class WBGaussianModel(GaussianModel):
         # create model params to be saved for model reloading
         # if train and test frames are not continuous (have gaps) the tensor entries are 0s
         self.model_params = {
-            'rotation': torch.zeros([T, 3]),
-            'translation': torch.zeros([T, 3]),
-            'scale': torch.ones([T, 3]),
+            'mesh_rotation': torch.zeros([T, 3]),
+            'mesh_translation': torch.zeros([T, 3]),
+            'mesh_scale': torch.ones([T, 3]),
         }
 
         for k, v in self.model_params.items():
@@ -108,19 +111,26 @@ class WBGaussianModel(GaussianModel):
         super().training_setup(training_args)
 
         # rotation
-        self.model_params['rotation'].requires_grad = True
-        param_rotation = {'params': [self.model_params['rotation']], 'lr': training_args.flame_pose_lr,
-                          "name": "rotation"}
+        self.model_params['mesh_rotation'].requires_grad = True
+        param_rotation = {'params': [self.model_params['mesh_rotation']], 'lr': training_args.flame_pose_lr,
+                          "name": "mesh_rotation"}
         self.optimizer.add_param_group(param_rotation)
 
         # translation
-        self.model_params['translation'].requires_grad = True
-        param_translation = {'params': [self.model_params['translation']], 'lr': training_args.flame_trans_lr,
-                             "name": "translation"}
+        self.model_params['mesh_translation'].requires_grad = True
+        param_translation = {'params': [self.model_params['mesh_translation']], 'lr': training_args.flame_trans_lr,
+                             "name": "mesh_translation"}
         self.optimizer.add_param_group(param_translation)
 
         # scale
-        self.model_params['scale'].requires_grad = True
-        param_translation = {'params': [self.model_params['scale']], 'lr': training_args.flame_pose_lr,
-                             "name": "scale"}
+        self.model_params['mesh_scale'].requires_grad = True
+        param_translation = {'params': [self.model_params['mesh_scale']], 'lr': training_args.flame_pose_lr,
+                             "name": "mesh_scale"}
         self.optimizer.add_param_group(param_translation)
+
+    def save_ply(self, path):
+        super().save_ply(path)
+
+        npz_path = Path(path).parent / "model_params.npz"
+        params = {k: v.cpu().numpy() for k, v in self.model_params.items()}
+        np.savez(str(npz_path), **params)
