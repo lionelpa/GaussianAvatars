@@ -69,6 +69,9 @@ class LocalViewer(Mini3DViewer):
         self.playing = False
         self.loop = False
 
+        self.min_timestep = 0
+        self.max_timestep = 100000
+
         print("Initializing 3D Gaussians...")
         self.init_gaussians()
 
@@ -86,6 +89,9 @@ class LocalViewer(Mini3DViewer):
             self.num_timesteps = self.gaussians.num_timesteps
             self.min_timestep = self.gaussians.min_timestep
             self.max_timestep = self.gaussians.max_timestep
+
+            self.lb_frame = max(0, self.min_timestep)
+            self.rb_frame = min(self.max_timestep, 1000000)
             dpg.configure_item("_slider_timestep", min_value=self.min_timestep, max_value=self.max_timestep)
 
             self.gaussians.select_mesh_by_timestep(self.min_timestep)
@@ -174,6 +180,24 @@ class LocalViewer(Mini3DViewer):
                     dpg.add_button(label='-', tag="_button_timestep_minus", callback=callback_set_current_frame)
                     dpg.add_button(label='+', tag="_button_timestep_plus", callback=callback_set_current_frame)
                     dpg.add_slider_int(label="timestep", tag='_slider_timestep', width=153, min_value=self.timestep, max_value=self.num_timesteps - 1, format="%d", default_value=self.timestep, callback=callback_set_current_frame)
+
+                def frame_bounds(sender, app_data):
+                    if sender == "_lb_timestep":
+                        self.lb_frame = dpg.get_value("_lb_timestep")
+                        self.rb_frame = max(self.lb_frame, self.rb_frame)
+                        self.timestep = max(self.timestep, self.lb_frame)
+                    elif sender == "_rb_timestep":
+                        self.rb_frame = dpg.get_value("_rb_timestep")
+                        self.lb_frame = min(self.lb_frame, self.rb_frame)
+                        self.timestep = min(self.timestep, self.rb_frame)
+                    else:
+                        raise Exception("unknown sender")
+                    self.need_update = True
+
+
+                with dpg.group(horizontal=True):
+                    dpg.add_input_int(label="from", tag='_lb_timestep', width=50, min_value=self.min_timestep, max_value=self.max_timestep - 1, default_value=self.min_timestep, callback=frame_bounds, step=0, on_enter=True)
+                    dpg.add_input_int(label="to"  , tag='_rb_timestep', width=50, min_value=self.min_timestep, max_value=self.max_timestep - 1, default_value=self.max_timestep, callback=frame_bounds, step=0, on_enter=True)
 
             # # render_mode combo
             # def callback_change_mode(sender, app_data):
@@ -350,12 +374,18 @@ class LocalViewer(Mini3DViewer):
                 self.need_update = False
 
                 if self.playing:
+                    start = max(self.min_timestep, self.lb_frame)
+                    end = min(self.max_timestep, self.rb_frame)
                     if self.loop:
-                        self.timestep = max(self.min_timestep, (self.timestep + 1) % self.max_timestep)
+                        self.timestep = max(start, (self.timestep + 1) % end)
                     else:
-                        self.timestep = min(self.timestep + 1, self.max_timestep )
+                        self.timestep = min(self.timestep + 1, end )
                     dpg.set_value("_slider_timestep", self.timestep)
                     self.gaussians.select_mesh_by_timestep(self.timestep)
+
+                dpg.set_value("_lb_timestep", self.lb_frame)
+                dpg.set_value("_rb_timestep", self.rb_frame)
+                dpg.set_value("_slider_timestep", self.timestep)
 
             dpg.render_dearpygui_frame()
 
