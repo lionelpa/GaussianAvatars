@@ -134,3 +134,13 @@ class WBGaussianModel(GaussianModel):
         npz_path = Path(path).parent / "model_params.npz"
         params = {k: v.cpu().numpy() for k, v in self.model_params.items()}
         np.savez(str(npz_path), **params)
+
+    def load_ply(self, path, **kwargs):
+        super().load_ply(path)
+
+        # Load rot scale trans learned in training
+        npz_path = Path(path).parent / "model_params.npz"
+        model_params = np.load(str(npz_path))
+        model_params = {k: torch.from_numpy(v).cuda() for k, v in model_params.items()}
+
+        self.model_params = model_params
