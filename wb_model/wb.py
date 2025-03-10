@@ -5,9 +5,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from PIL import Image
-from torch import einsum
 
-import utils.pytorch3d
+from utils.pytorch3d import euler_angles_to_matrix
 
 try:
     from pytorch3d.io import load_obj
@@ -107,55 +106,31 @@ class WBModel(nn.Module):
     #     return  extended_blendshapes
 
     def forward(self, translation, rotation, scale, blendshape_weights, timestep, mean):
-        # apply blendshapes to head
-        # print("=========== FORWARD =============================")
-        # print(">>> params:")
-        # print("translation", translation)
-        # print("rotation", rotation)
-        # print("scale", scale)
-        # print("blendshape_weights", blendshape_weights)
-        # print("===")
-        # print("self.v_neutral:", self.v_neutral.shape)
-        # print("self.shapes:", self.shapes.shape)
-        #
-        # for i in range(blendshape_weights.shape[0]):
-        #     print(f"{i} {self.shapes_names[i]}\t{float(blendshape_weights[i])}")
-
-        ### DBS = DELTA_BLENDSHAPES
         # apply only to head
-        # # (necessary because translate by -c depends on head verts only and including eyes would add inaccuracies)
-        DBS = self.head_neutral_v + einsum("w,wvc->vc", blendshape_weights, self.shapes)
-        save_obj(f"./output/A_{timestep}_1_DBS.obj", verts=DBS, faces=self.faces)
+        w_0 = blendshape_weights.unsqueeze(0)
+        t_0 = translation.unsqueeze(0)
+        R_0 = rotation.unsqueeze(0)
+        s_0 = scale.unsqueeze(0)
+        bs = self.shapes.unsqueeze(0)
 
+        # Transformations applied to reconstruct face and align with cameras are done on an already centered
+        # neutral expression. Hence, we need to deduct the mean before transforming.
+        neutral_mean = self.head_neutral_v.mean(dim=0)
+        neutral = (self.head_neutral_v - neutral_mean).unsqueeze(0)
 
-        # rotation und translation durchführen
-        # (LBS - mean(LBS)) * R + mean(LBS) + t
-        # mit scaling: (LBS - mean(LBS)) * S * R + mean(LBS) + t
-        c = torch.mean(DBS, dim=0)
-        centered = DBS - c
-        save_obj(f"./output/A_{timestep}_2_centered.obj", verts=centered, faces=self.faces)
+        w_0 = w_0.reshape(*(w_0.shape), 1, 1)
+        weighted_bs = (w_0 * bs).sum(1) + neutral
 
-        scaled = centered * scale
-        save_obj(f"./output/A_{timestep}_3_scaled.obj", verts=scaled, faces=self.faces)
+        mean = mean.unsqueeze(0)
+        matrix_R = euler_angles_to_matrix(R_0, "XYZ")
 
+        rotated_pred = (torch.bmm(s_0 * (weighted_bs - mean), matrix_R)) + mean + t_0
 
-        rot_mat = utils.pytorch3d.euler_angles_to_matrix(rotation, convention="XYZ")
-        rotated = scaled @ rot_mat
-        save_obj(f"./output/A_{timestep}_4_rotated.obj", verts=rotated, faces=self.faces)
-
-
-        repositioned = rotated + c
-        save_obj(f"./output/A_{timestep}_5_repositioned.obj", verts=repositioned, faces=self.faces)
-
-
-        final = repositioned + translation
-
-        # für augen und head
-
-        # kopf und augen zusammenfügen
-        save_obj(f"./output/A_{timestep}_6_final.obj", verts=final, faces=self.faces)
-        raise Exception("JAA")
-        return
+        save_obj(f"./output/A_{timestep}_maxim.obj", verts=rotated_pred[0], faces=self.faces)
+        # raise Exception("MÖP")
+        # print("final",rotated_pred.shape)
+        # print("final[0]",rotated_pred[0].shape)
+        return rotated_pred
 
 
 
