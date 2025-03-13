@@ -64,12 +64,21 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     # chosen_cams = set()
     # training_start_time = datetime.now()
     # for cam in tqdm(iter_camera_train, desc="Render images for cams", unit=" cams"):
-    #     if cam.colmap_id not in chosen_cams and cam.timestep == 203:
+    #     if cam.colmap_id not in chosen_cams and cam.timestep == 4:
     #         chosen_cams.add(cam.colmap_id)
     #         gaussians.select_mesh_by_timestep(cam.timestep)
-    #         render_pkg = render(cam, gaussians, pipe, background)
-    #         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+    #
+    #         # export mesh render
+    #         out_dict = mesh_renderer.render_from_camera(gaussians.verts, gaussians.faces, cam)
+    #         rgba_mesh = out_dict['rgba'].squeeze(0)  # (H, W, C)
+    #         rgb_mesh = rgba_mesh[:, :, :3]
+    #         image=rgb_mesh.permute(2,0,1)
     #         save_tensor_as_image(image, cam, -1, training_start_time)
+    #
+    #         ## export gaussian render
+    #         render_pkg = render(cam, gaussians, pipe, background)
+    #         image = render_pkg["render"]
+    #         save_tensor_as_image(image, cam, -2, training_start_time)
     # raise Exception("Finished generating test images")
 
     # viewpoint_stack = None

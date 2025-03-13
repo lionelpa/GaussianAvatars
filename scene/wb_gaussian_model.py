@@ -71,10 +71,6 @@ class WBGaussianModel(GaussianModel):
         self.verts = verts
         self.faces = faces
 
-    def compute_dynamic_offset_loss(self):
-        # loss_dynamic = (self.flame_param['dynamic_offset'][[self.timestep]] - self.flame_param_orig['dynamic_offset'][[self.timestep]]).norm(dim=-1)
-        loss_dynamic = self.flame_param['dynamic_offset'][[self.timestep]].norm(dim=-1)
-        return loss_dynamic.mean()
 
     def save_ply(self, path):
         super().save_ply(path)
@@ -138,8 +134,8 @@ class WBGaussianModel(GaussianModel):
 
         # expression
         self.model_params['bs_weights'].requires_grad = True
-        param_expr = {'params': [self.model_params['bs_weights']], 'lr': training_args.flame_expr_lr, "name": "bs_weights"}
-        self.optimizer.add_param_group(param_expr)
+        param_bs_weights = {'params': [self.model_params['bs_weights']], 'lr': training_args.flame_expr_lr, "name": "bs_weights"}
+        self.optimizer.add_param_group(param_bs_weights)
 
         # # make static offset learnable
         # self.model_params['static_offset'].requires_grad = True

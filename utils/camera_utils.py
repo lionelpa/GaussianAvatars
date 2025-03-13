@@ -154,3 +154,26 @@ def save_cams_as_mesh(cameras: [Camera], scale=0.025):
     camera_faces = torch.from_numpy(camera_faces)
 
     save_obj("./output/camera_models.obj", verts=camera_verts, faces= camera_faces)
+
+def save_cams_as_pcd(cameras: [Camera], scale=0.025):
+
+    lookdir_verts = np.array([[0, 0, 0], [0, 0, 1],[0, 0, 2],[0, 0, 3],[0, 0, 4],[0, 0, 5]]) * scale
+
+    camera_verts=[]
+    for i, c in enumerate(cameras):
+        t = c.camera_center.numpy().reshape(1,3)
+
+        w2c = c.world_view_transform
+        R = np.linalg.inv(w2c)[:3,:3] # rot of c2w
+
+        vs = (lookdir_verts @ R) + t
+
+        camera_verts.append(vs)
+
+    # Convert lists to proper NumPy arrays
+    camera_verts = np.vstack(camera_verts)  # Stack along the first axis
+
+    # Convert to tensors
+    camera_verts = torch.from_numpy(camera_verts)
+
+    save_obj("./output/camera_models_pcd.obj", verts=camera_verts, faces=torch.tensor([]))

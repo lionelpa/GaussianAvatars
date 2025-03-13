@@ -16,16 +16,12 @@ except ImportError:
 ROOT = "/home/lio/PycharmProjects/data/scanner_wb/video"
 # WB_HEAD_BASE_MESH_PATH     = ROOT + "/meshes_weights/0_head_nicolas_neutral.obj"
 # WB_EYES_BASE_MESH_PATH     = ROOT + "/meshes_weights/0_eyes_nicolas_neutral.obj"
-WB_HEAD_BASE_MESH_PATH     = ROOT + "/smooth_new/0_head_nicolas_neutral.obj"
-WB_EYES_BASE_MESH_PATH     = ROOT + "/smooth_new/0_eyes_nicolas_neutral.obj"
-WB_MESH_FOR_CENTERING_PATH = ROOT + "/smooth_new/4_head.obj"
+WB_HEAD_BASE_MESH_PATH     = ROOT + "/smooth2/0_head_nicolas_neutral.obj"
+WB_EYES_BASE_MESH_PATH     = ROOT + "/smooth2/0_eyes_nicolas_neutral.obj"
+WB_MESH_FOR_CENTERING_PATH = ROOT + "/smooth2/4_head.obj"
 WB_BLENDSHAPES_PATH        = ROOT + "/bs" #"wb_model/assets/"
-
-WB_FRAME_PARAMS_PATH       = "([0-9]+)_head\.obj"
-WB_EYES_MESHES_NAME_FILTER_PATTERN="([0-9]+)_eyes\.obj"
 WB_TEXTURE_PATH = "wb_model/assets/skin_basecolor.png"
 TARGET_HEIGHT = 0.34316921 # determined from flame base model height, used to rescale wb mesh
-
 
 
 
@@ -95,16 +91,6 @@ class WBModel(nn.Module):
                     assert False, f"Could not read {blendshape_file_path}\n{e}"
         return torch.vstack(shapes), shapes_names
 
-    def load_blendshapes(self, neutral, blendshapes_path, blendshape_order_file="blendshapes_order.txt"):
-        return self.load_delta_blendshapes(None, blendshapes_path, blendshape_order_file)
-
-    # def extend_blend_shape_verts_by_eyes(self, blendshapes, neutral_eyes_verts):
-    #     # blendshapes        = B x Vb x 3
-    #     # neutral_eyes_verts =     Ve x 3
-    #     eyes_expanded = neutral_eyes_verts.unsqueeze(0).repeat(blendshapes.shape[0], 1, 1)  # (B, Ve, 3)
-    #     extended_blendshapes = torch.cat([blendshapes, eyes_expanded], dim=1)
-    #     return  extended_blendshapes
-
     def forward(self, translation, rotation, scale, blendshape_weights, timestep, mean):
         # apply only to head
         w_0 = blendshape_weights.unsqueeze(0)
@@ -112,26 +98,28 @@ class WBModel(nn.Module):
         R_0 = rotation.unsqueeze(0)
         s_0 = scale.unsqueeze(0)
         bs = self.shapes.unsqueeze(0)
+        mean = mean.unsqueeze(0)
 
         # Transformations applied to reconstruct face and align with cameras are done on an already centered
         # neutral expression. Hence, we need to deduct the mean before transforming.
-        neutral_mean = self.head_neutral_v.mean(dim=0)
-        neutral = (self.head_neutral_v - neutral_mean).unsqueeze(0)
+        # clarification: center using computed mean -> later use passed mean param for transform
+        neutral_head_mean = self.head_neutral_v.mean(dim=0)
+        head_neutral_centered_v = (self.head_neutral_v - neutral_head_mean).unsqueeze(0)
+        eyes_neutral_centered_v = (self.eyes_neutral_v - neutral_head_mean).unsqueeze(0)
 
+        # apply blendshapes
         w_0 = w_0.reshape(*(w_0.shape), 1, 1)
-        weighted_bs = (w_0 * bs).sum(1) + neutral
+        weighted_bs = (w_0 * bs).sum(1) + head_neutral_centered_v
 
-        mean = mean.unsqueeze(0)
+        # combine with eyes
+        full_expr_v = torch.cat([weighted_bs, eyes_neutral_centered_v], dim=1)
+
+        # transform
         matrix_R = euler_angles_to_matrix(R_0, "XYZ")
+        rotated_pred = (torch.bmm(s_0 * (full_expr_v - mean), matrix_R)) + mean + t_0
+        #save_obj(f"./output/A_{timestep}_maxim.obj", verts=rotated_pred[0], faces=self.faces)
 
-        rotated_pred = (torch.bmm(s_0 * (weighted_bs - mean), matrix_R)) + mean + t_0
-
-        save_obj(f"./output/A_{timestep}_maxim.obj", verts=rotated_pred[0], faces=self.faces)
-        # raise Exception("MÖP")
-        # print("final",rotated_pred.shape)
-        # print("final[0]",rotated_pred[0].shape)
         return rotated_pred
-
 
 
 if __name__ == '__main__':
