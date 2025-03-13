@@ -14,14 +14,14 @@ except ImportError:
     from utils.pytorch3d_load_obj import load_obj, save_obj
 
 ROOT = "/home/lio/PycharmProjects/data/scanner_wb/video"
-# WB_HEAD_BASE_MESH_PATH     = ROOT + "/meshes_weights/0_head_nicolas_neutral.obj"
-# WB_EYES_BASE_MESH_PATH     = ROOT + "/meshes_weights/0_eyes_nicolas_neutral.obj"
 WB_HEAD_BASE_MESH_PATH     = ROOT + "/smooth2/0_head_nicolas_neutral.obj"
 WB_EYES_BASE_MESH_PATH     = ROOT + "/smooth2/0_eyes_nicolas_neutral.obj"
-WB_MESH_FOR_CENTERING_PATH = ROOT + "/smooth2/4_head.obj"
-WB_BLENDSHAPES_PATH        = ROOT + "/bs" #"wb_model/assets/"
+WB_BLENDSHAPES_PATH        = ROOT + "/bs" #"wb_model/assets/bs"
 WB_TEXTURE_PATH = "wb_model/assets/skin_basecolor.png"
+
+# needed for adjustment of pos and scale to those of FLAME
 TARGET_HEIGHT = 0.34316921 # determined from flame base model height, used to rescale wb mesh
+WB_MESH_FOR_CENTERING_PATH = ROOT + "/smooth2/4_head.obj"
 
 
 
@@ -74,6 +74,22 @@ class WBModel(nn.Module):
         self.raw_mesh_centroid = torch.zeros(3)
         self.rescale_factor = 1
 
+        ### CENTERING PARAMS NEEDED TO ADJUST TO FLAME ###
+        vs, _, _ = load_obj(wb_mesh_for_centering_path, load_textures=False)
+        self.raw_mesh_centroid = torch.zeros(3).cuda()
+        self.rescale_factor = torch.tensor(1).cuda()
+        if center_and_scale:
+            print("Calculating vector for centering and rescaling...")
+            self.raw_mesh_centroid = torch.mean(vs, dim=0).cuda()
+            ys = vs[:, 1]
+            min_y = float(torch.min(ys))
+            max_y = float(torch.max(ys))
+            height = max_y - min_y
+            self.rescale_factor = torch.tensor(target_height / height).cuda()
+        print("self.raw_mesh_centroid", self.raw_mesh_centroid)
+        print("self.rescale_factor", self.rescale_factor)
+
+
     def load_delta_blendshapes(self, neutral, blendshapes_path, blendshape_order_file="blendshapes_order.txt"):
         shapes = []
         shapes_names = []
@@ -117,7 +133,11 @@ class WBModel(nn.Module):
         # transform
         matrix_R = euler_angles_to_matrix(R_0, "XYZ")
         rotated_pred = (torch.bmm(s_0 * (full_expr_v - mean), matrix_R)) + mean + t_0
-        #save_obj(f"./output/A_{timestep}_maxim.obj", verts=rotated_pred[0], faces=self.faces)
+
+        # center and scale
+        centroid = self.raw_mesh_centroid.unsqueeze(0)
+        rotated_pred = self.rescale_factor * (rotated_pred - centroid)
+        # save_obj(f"./output/A_{timestep}_maxim.obj", verts=rotated_pred[0], faces=self.faces)
 
         return rotated_pred
 

@@ -45,7 +45,7 @@ class CameraInfo(NamedTuple):
     timestep: Optional[int] = None
     camera_id: Optional[int] = None
     trans: np.array = np.array([0, 0, 0])
-    scale: int = 1
+    scale: float = 1
 
 class SceneInfo(NamedTuple):
     train_cameras: list
@@ -254,7 +254,7 @@ def readWBCamerasFromXML(source_path, images_folder_name, cameras_xml_file_name,
             # param 'image' is None since it is loaded dynamically by the DatasetLoader in train.py
             cam = CameraInfo(uid=cam_id, FovY=sensor.FovY, FovX=sensor.FovX, width=sensor.width, height=sensor.height,
                              R=R, T=T, image=None, image_path=image_path, image_name=image_name, timestep=timestep,
-                             trans=-centroid.numpy(), scale=rescale_factor)
+                             trans=-centroid, scale=rescale_factor)
 
             if timestep in test_frames:
                 test_cam_infos.append(cam)

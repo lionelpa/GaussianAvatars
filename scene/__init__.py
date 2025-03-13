@@ -92,8 +92,9 @@ class Scene:
         # load dataset
         assert os.path.exists(args.source_path), "Source path does not exist: {}".format(args.source_path)
         if os.path.exists(args.source_path):
-            scene_info = sceneLoadTypeCallbacks["ScannerWB"](args.source_path, args.images, gaussians.raw_mesh_centroid,
-                                                             gaussians.rescale_factor,
+            scene_info = sceneLoadTypeCallbacks["ScannerWB"](args.source_path, args.images,
+                                                             gaussians.raw_mesh_centroid.cpu().numpy(),
+                                                             float(gaussians.rescale_factor),
                                                              {8}, set(range(4,54)), set(range(401, 403)), args.eval)
         # elif os.path.exists(os.path.join(args.source_path, "sparse")):
         #     scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval)
