@@ -181,6 +181,7 @@ class GaussianModel:
             if init_pcd_from_texture:
                 print("Initializing point cloud from texture...")
                 fused_color = torch.tensor(self.calc_init_tri_color()).float().cuda()
+                fused_color = RGB2SH(fused_color).float().cuda()
             else:
                 fused_color = torch.tensor(np.random.random((num_pts, 3)) / 255.0).float().cuda()
         else:

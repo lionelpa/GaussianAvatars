@@ -32,6 +32,15 @@ def load_texture(texture_path):
 
     return texture_np
 
+
+def assertTexture(texture):
+    # check random points to match color value
+    assert (texture[100, 100] == np.array([44,96,149])).all()
+    assert (texture[200, 3800] == np.array([56,51,29])).all()
+    assert (texture[3900, 300] == np.array([107,94,75])).all()
+    assert (texture[3900, 3500] == np.array([165,130,114])).all()
+
+
 class WBModel(nn.Module):
 
 
@@ -68,8 +77,9 @@ class WBModel(nn.Module):
 
         ### TEXTURE ###
         self.texture = load_texture(wb_texture_path)
+        assertTexture(self.texture)
         self.verts_uvs = torch.vstack((neutral_head_aux.verts_uvs, neutral_eyes_aux.verts_uvs))
-        self.faces_uvs = torch.vstack((neutral_head_faces.textures_idx, neutral_eyes_faces.textures_idx))
+        self.faces_uvs = torch.vstack((neutral_head_faces.textures_idx, neutral_eyes_faces.textures_idx + neutral_head_aux.verts_uvs.shape[0]))
 
         self.raw_mesh_centroid = torch.zeros(3)
         self.rescale_factor = 1
