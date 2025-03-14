@@ -103,11 +103,11 @@ class WBGaussianModel(GaussianModel):
         }
 
         for timestep, mesh in meshes.items():
-            self.model_params['mesh_rotation'][timestep] = mesh['mesh_rotation'].clone()
-            self.model_params['mesh_translation'][timestep] = mesh['mesh_translation'].clone()
-            self.model_params['mesh_scale'][timestep] = mesh['mesh_scale'].clone()
+            self.model_params['mesh_rotation'][timestep] = mesh['rotation'].clone()
+            self.model_params['mesh_translation'][timestep] = mesh['translation'].clone()
+            self.model_params['mesh_scale'][timestep] = mesh['scale'].clone()
             self.model_params['bs_weights'][timestep] = mesh['bs_weights'].clone()
-            self.model_params['mesh_mean'][timestep] = mesh['mesh_mean'].clone()
+            self.model_params['mesh_mean'][timestep] = mesh['mean'].clone()
 
         for k, v in self.model_params.items():
             self.model_params[k] = v.float().cuda()
@@ -117,7 +117,7 @@ class WBGaussianModel(GaussianModel):
 
         # rotation
         self.model_params['mesh_rotation'].requires_grad = True
-        param_rotation = {'params': [self.model_params['mesh_rotation']], 'lr': training_args.flame_pose_lr, "name": "rotation"}
+        param_rotation = {'params': [self.model_params['mesh_rotation']], 'lr': training_args.flame_pose_lr, "name": "mesh_rotation"}
         self.optimizer.add_param_group(param_rotation)
 
         # translation

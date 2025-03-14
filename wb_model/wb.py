@@ -13,7 +13,7 @@ try:
 except ImportError:
     from utils.pytorch3d_load_obj import load_obj, save_obj
 
-ROOT = "/home/lio/PycharmProjects/data/scanner_wb/video"
+ROOT = "/home/lionel.azevedo/data/wb_scanner" # "/home/lio/PycharmProjects/data/scanner_wb/video"
 WB_HEAD_BASE_MESH_PATH     = ROOT + "/smooth2/0_head_nicolas_neutral.obj"
 WB_EYES_BASE_MESH_PATH     = ROOT + "/smooth2/0_eyes_nicolas_neutral.obj"
 WB_BLENDSHAPES_PATH        = ROOT + "/bs" #"wb_model/assets/bs"
