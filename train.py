@@ -279,6 +279,18 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
         tb_writer.add_scalar('train_loss_patches/total_loss', losses['total'].item(), iteration)
         tb_writer.add_scalar('iter_time', elapsed, iteration)
 
+        tb_writer.add_scalar('transform/rotation',
+                             torch.linalg.vector_norm(scene.gaussians.model_params['mesh_rotation'].sum(dim=0)),
+                             iteration)
+        tb_writer.add_scalar('transform/scale',
+                             torch.linalg.vector_norm(scene.gaussians.model_params['mesh_scale'].sum(dim=0)), iteration)
+        tb_writer.add_scalar('transform/translation',
+                             torch.linalg.vector_norm(scene.gaussians.model_params['mesh_translation'].sum(dim=0)),
+                             iteration)
+        tb_writer.add_scalar('transform/bs_wights',
+                             torch.linalg.vector_norm(scene.gaussians.model_params['bs_weights'].sum()),
+                             iteration)
+
     # if tb_writer:
     #     for viewpoint in scene.getValCameras():
     #         if viewpoint.timestep in [4, 31, 62, 134, 164, 224, 279, 399] and iteration in [1,50,100,150,200,250,300,500,1000,2000,5000,10000,20000,50000,100000,300000,600000]:

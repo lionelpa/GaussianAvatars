@@ -45,11 +45,11 @@ class WBGaussianModel(GaussianModel):
 
         verts = self.wb_model(
             timestep=timestep,
-            rotation=self.model_params['rotation'][timestep],
-            translation=self.model_params['translation'][timestep],
-            scale=self.model_params['scale'][timestep],
+            rotation=self.model_params['mesh_rotation'][timestep],
+            translation=self.model_params['mesh_translation'][timestep],
+            scale=self.model_params['mesh_scale'][timestep],
             blendshape_weights=self.model_params['bs_weights'][timestep],
-            mean=self.model_params['mean'][timestep],
+            mean=self.model_params['mesh_mean'][timestep],
         )
         
         self.update_mesh_properties(verts)
@@ -94,20 +94,20 @@ class WBGaussianModel(GaussianModel):
         # if train and test frames are not continuous (have gaps) the tensor entries are 0s
         self.model_params = {
             'center_and_scale': torch.tensor(int(self.center_and_scale)),
-            'rotation': torch.zeros([T, 3]),
-            'translation': torch.zeros([T, 3]),
-            'scale': torch.ones([T, 3]),
+            'mesh_rotation': torch.zeros([T, 3]),
+            'mesh_translation': torch.zeros([T, 3]),
+            'mesh_scale': torch.ones([T, 3]),
             'bs_weights': torch.zeros([T, list(meshes.values())[0]['bs_weights'].shape[0]]),
-            'mean': torch.ones([T, 3]),
+            'mesh_mean': torch.ones([T, 3]),
             # 'static_offset': torch.zeros_like(self.verts).cuda(),
         }
 
         for timestep, mesh in meshes.items():
-            self.model_params['rotation'][timestep] = mesh['rotation'].clone()
-            self.model_params['translation'][timestep] = mesh['translation'].clone()
-            self.model_params['scale'][timestep] = mesh['scale'].clone()
+            self.model_params['mesh_rotation'][timestep] = mesh['mesh_rotation'].clone()
+            self.model_params['mesh_translation'][timestep] = mesh['mesh_translation'].clone()
+            self.model_params['mesh_scale'][timestep] = mesh['mesh_scale'].clone()
             self.model_params['bs_weights'][timestep] = mesh['bs_weights'].clone()
-            self.model_params['mean'][timestep] = mesh['mean'].clone()
+            self.model_params['mesh_mean'][timestep] = mesh['mesh_mean'].clone()
 
         for k, v in self.model_params.items():
             self.model_params[k] = v.float().cuda()
@@ -116,20 +116,20 @@ class WBGaussianModel(GaussianModel):
         super().training_setup(training_args)
 
         # rotation
-        self.model_params['rotation'].requires_grad = True
-        param_rotation = {'params': [self.model_params['rotation']], 'lr': training_args.flame_pose_lr, "name": "rotation"}
+        self.model_params['mesh_rotation'].requires_grad = True
+        param_rotation = {'params': [self.model_params['mesh_rotation']], 'lr': training_args.flame_pose_lr, "name": "rotation"}
         self.optimizer.add_param_group(param_rotation)
 
         # translation
-        self.model_params['translation'].requires_grad = True
-        param_translation = {'params': [self.model_params['translation']], 'lr': training_args.flame_trans_lr,
-                             "name": "translation"}
+        self.model_params['mesh_translation'].requires_grad = True
+        param_translation = {'params': [self.model_params['mesh_translation']], 'lr': training_args.flame_trans_lr,
+                             "name": "mesh_translation"}
         self.optimizer.add_param_group(param_translation)
 
         # scale
-        self.model_params['scale'].requires_grad = True
-        param_translation = {'params': [self.model_params['scale']], 'lr': training_args.flame_pose_lr,
-                             "name": "scale"}
+        self.model_params['mesh_scale'].requires_grad = True
+        param_translation = {'params': [self.model_params['mesh_scale']], 'lr': training_args.flame_pose_lr,
+                             "name": "mesh_scale"}
         self.optimizer.add_param_group(param_translation)
 
         # expression
