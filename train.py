@@ -279,17 +279,21 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
         tb_writer.add_scalar('train_loss_patches/total_loss', losses['total'].item(), iteration)
         tb_writer.add_scalar('iter_time', elapsed, iteration)
 
-        tb_writer.add_scalar('transform/rotation',
-                             torch.linalg.vector_norm(scene.gaussians.model_params['mesh_rotation'].sum(dim=0)),
-                             iteration)
-        tb_writer.add_scalar('transform/scale',
-                             torch.linalg.vector_norm(scene.gaussians.model_params['mesh_scale'].sum(dim=0)), iteration)
-        tb_writer.add_scalar('transform/translation',
-                             torch.linalg.vector_norm(scene.gaussians.model_params['mesh_translation'].sum(dim=0)),
-                             iteration)
-        tb_writer.add_scalar('transform/bs_wights',
-                             torch.linalg.vector_norm(scene.gaussians.model_params['bs_weights'].sum()),
-                             iteration)
+        if iteration % 100 == 0:
+            tb_writer.add_scalar('transform/rotation',
+                                 torch.linalg.vector_norm(scene.gaussians.model_params['mesh_rotation'].sum(dim=0)),
+                                 iteration)
+            tb_writer.add_scalar('transform/scale',
+                                 torch.linalg.vector_norm(scene.gaussians.model_params['mesh_scale'].sum(dim=0)), iteration)
+            tb_writer.add_scalar('transform/translation',
+                                 torch.linalg.vector_norm(scene.gaussians.model_params['mesh_translation'].sum(dim=0)),
+                                 iteration)
+            tb_writer.add_scalar('transform/bs_weights',
+                                 torch.linalg.vector_norm(scene.gaussians.model_params['bs_weights'].sum()),
+                                 iteration)
+            tb_writer.add_scalar('transform/static_offset',
+                                 torch.linalg.vector_norm(scene.gaussians.model_params['static_offset']),
+                                 iteration)
 
     # if tb_writer:
     #     for viewpoint in scene.getValCameras():
@@ -365,6 +369,21 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - ssim', ssim_test, iteration)
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - lpips', lpips_test, iteration)
 
+        # render train
+        visible_cams = [0,3,12,13]
+        for idx, viewpoint in tqdm(enumerate(DataLoader(scene.getTrainCameras(), shuffle=False, batch_size=None, num_workers=8))):
+            if tb_writer and viewpoint.timestep % 12 == 0 and viewpoint.colmap_id in visible_cams:
+                image = torch.clamp(renderFunc(viewpoint, scene.gaussians, *renderArgs)["render"], 0.0, 1.0)
+                gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
+                tb_writer.add_images(f"train_c{viewpoint.colmap_id}_t{viewpoint.timestep}/render", image[None],
+                                     global_step=iteration)
+                error_image = error_map(image, gt_image)
+                tb_writer.add_images(f"train_c{viewpoint.colmap_id}_t{viewpoint.timestep}/error", error_image[None],
+                                     global_step=iteration)
+                if iteration == testing_iterations[0]:
+                    tb_writer.add_images(f"train_c{viewpoint.colmap_id}_t{viewpoint.timestep}/ground_truth", gt_image[None],
+                                         global_step=iteration)
+
         torch.cuda.empty_cache()
 
 def save_params_to_json(lp, op, pp, args, folder, filename="params_ga.json"):
@@ -413,7 +432,7 @@ if __name__ == "__main__":
     if len(args.checkpoint_iterations) == 0:
         args.checkpoint_iterations.extend(list(range(args.interval, args.iterations+1, args.interval)))
     
-    args.test_iterations = [1, 500, 1000, 5000, 10000, 30000] + args.test_iterations
+    args.test_iterations = [1, 500, 1000, 5000, 10000, 20000, 30000] + args.test_iterations
     args.save_iterations = [1] + args.save_iterations
 
     print("Optimizing " + args.model_path)

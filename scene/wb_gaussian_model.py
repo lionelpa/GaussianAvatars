@@ -50,6 +50,7 @@ class WBGaussianModel(GaussianModel):
             scale=self.model_params['mesh_scale'][timestep],
             blendshape_weights=self.model_params['bs_weights'][timestep],
             mean=self.model_params['mesh_mean'][timestep],
+            static_offset=self.model_params['static_offset'],
         )
         
         self.update_mesh_properties(verts)
@@ -99,7 +100,7 @@ class WBGaussianModel(GaussianModel):
             'mesh_scale': torch.ones([T, 3]),
             'bs_weights': torch.zeros([T, list(meshes.values())[0]['bs_weights'].shape[0]]),
             'mesh_mean': torch.ones([T, 3]),
-            # 'static_offset': torch.zeros_like(self.verts).cuda(),
+            'static_offset': torch.zeros_like(self.wb_model.verts),
         }
 
         for timestep, mesh in meshes.items():
@@ -137,7 +138,7 @@ class WBGaussianModel(GaussianModel):
         param_bs_weights = {'params': [self.model_params['bs_weights']], 'lr': training_args.flame_expr_lr, "name": "bs_weights"}
         self.optimizer.add_param_group(param_bs_weights)
 
-        # # make static offset learnable
-        # self.model_params['static_offset'].requires_grad = True
-        # param_static_offset = {'params': [self.model_params['static_offset']], 'lr': 1e-6, "name": "static_offset"}
-        # self.optimizer.add_param_group(param_static_offset)
+        # static_offset
+        self.model_params['static_offset'].requires_grad = True
+        param_static_offset = {'params': [self.model_params['static_offset']], 'lr': 1e-6, "name": "static_offset"}
+        self.optimizer.add_param_group(param_static_offset)

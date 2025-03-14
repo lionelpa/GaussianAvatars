@@ -107,13 +107,14 @@ class WBModel(nn.Module):
                     assert False, f"Could not read {blendshape_file_path}\n{e}"
         return torch.vstack(shapes), shapes_names
 
-    def forward(self, translation, rotation, scale, blendshape_weights, timestep, mean):
+    def forward(self, translation, rotation, scale, blendshape_weights, timestep, mean, static_offset):
         # apply only to head
         w_0 = blendshape_weights.unsqueeze(0)
         t_0 = translation.unsqueeze(0)
         R_0 = rotation.unsqueeze(0)
         s_0 = scale.unsqueeze(0)
         bs = self.shapes.unsqueeze(0)
+        static_offset = static_offset.unsqueeze(0)
         mean = mean.unsqueeze(0)
 
         # Transformations applied to reconstruct face and align with cameras are done on an already centered
@@ -129,6 +130,7 @@ class WBModel(nn.Module):
 
         # combine with eyes
         full_expr_v = torch.cat([weighted_bs, eyes_neutral_centered_v], dim=1)
+        full_expr_v = full_expr_v + static_offset
 
         # transform
         matrix_R = euler_angles_to_matrix(R_0, "XYZ")
