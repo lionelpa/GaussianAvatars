@@ -146,8 +146,7 @@ class Scene:
         
         # process meshes
         if gaussians.binding != None:
-            self.gaussians.load_meshes(scene_info.train_meshes, scene_info.test_meshes, 
-                                       scene_info.tgt_train_meshes, scene_info.tgt_test_meshes)
+            self.gaussians.load_meshes(scene_info.meshes)
 
         save_cams_as_mesh(
             self.getTrainCameras().cameras + self.getTestCameras().cameras + self.getValCameras().cameras)

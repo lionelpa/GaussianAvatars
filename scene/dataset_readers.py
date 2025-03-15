@@ -58,6 +58,8 @@ class SceneInfo(NamedTuple):
     test_meshes: dict = {}
     tgt_train_meshes: dict = {}
     tgt_test_meshes: dict = {}
+    #
+    meshes: dict = {}
 
 def getNerfppNorm(cam_info):
     def get_center_and_diag(cam_centers):
@@ -108,66 +110,43 @@ def getNerfppNormHylec(cam_info):
     return {"translate": translate, "radius": radius}
 
 
-def readMeshParamsForFrames(source_path, train_frames, test_frames, eval):
+def readMeshParamsForTimesteps(source_path):
+    # We need to parse infos for all frames(timesteps) so when the model gets saved all params get saved. This is
+    # necessary because if we only load the params for test and train frames we wouldnt be able to look at frames
+    # outside them properly in the viewer.
     # TODO parameterize
     params_path = os.path.join(source_path, "smooth2")
-    wanted_frames = train_frames.union(test_frames) if eval else train_frames
-    Rs = [f"{f}_R.txt" for f in wanted_frames] # naming convention is {frame}_R.txt
-    Ts = [f"{f}_t.txt" for f in wanted_frames] # naming convention is {frame}_t.txt
-    Ss = [f"{f}_s.txt" for f in wanted_frames] # naming convention is {frame}_s.txt
-    Ws = [f"{f}_w.txt" for f in wanted_frames] # naming convention is {frame}_w.txt
-    means = [f"{f}_mean.txt" for f in wanted_frames] # naming convention is {frame}_w.txt
 
-    Rs = { int(n[:-6]):n for n in Rs }
-    Ts = { int(n[:-6]):n for n in Ts }
-    Ss = { int(n[:-6]):n for n in Ss }
-    Ws = { int(n[:-6]):n for n in Ws }
-    means = { int(n[:-9]):n for n in means }
+    Rs = readMeshParam(params_path, "*_R.txt", 3)
+    Ts = readMeshParam(params_path, "*_t.txt", 3)
+    Ss = readMeshParam(params_path, "*_s.txt", 3)
+    Ws = readMeshParam(params_path, "*_w.txt", 52)
+    means = readMeshParam(params_path, "*_mean.txt", 3)
     assert len(Rs) == len(Ts) == len(Ss) == len(Ws) == len(means), "Number of params mismatch. Are some txt-files missing?"
 
-    train_mesh_infos = {}
-    test_mesh_infos = {}
+    mesh_params = {t:{"rotation":Rs[t],
+                           "translation":Ts[t],
+                           "scale":Ss[t],
+                           "bs_weights":Ws[t],
+                           "mean":means[t]} for t in Rs.keys()}
+    return mesh_params
 
-    # Loop through all eligible timesteps and parse R,t,s,w files
-    for timestep in wanted_frames:
-        R = Rs[timestep]
-        T = Ts[timestep]
-        S = Ss[timestep]
-        W = Ws[timestep]
-        mean = means[timestep]
+def readMeshParam(params_path, param_filename_pattern, expected_param_dim):
+    # load param from file matching Pattern
+    file_pattern = os.path.join(params_path, param_filename_pattern)
+    file_list = glob.glob(file_pattern)
+    # loop through each matching file and print its contents
+    param_dict = {}
+    for file_path in file_list:
+        # extract filename without path
+        filename = os.path.basename(file_path)
+        timestep = int(filename.split("_")[0])  # format like "{timestep}_R.txt"
 
-        timestep_dict = {}
-        with open(os.path.join(params_path, R)) as f:
-            euler_angles = torch.tensor([float(x.strip()) for x in f.readlines()])
-            timestep_dict['rotation'] = euler_angles
-            assert len(euler_angles) == 3
-
-        with open(os.path.join(params_path, T)) as f:
-            translation = torch.tensor([float(x.strip()) for x in f.readlines()])
-            timestep_dict['translation'] = translation
-            assert len(translation) == 3
-
-        with open(os.path.join(params_path, S)) as f:
-            scale = torch.tensor([float(x.strip()) for x in f.readlines()])
-            timestep_dict['scale'] = scale
-            assert len(scale) == 3
-
-        with open(os.path.join(params_path, W)) as f:
-            bs_weights = torch.tensor([float(x.strip()) for x in f.readlines()])
-            timestep_dict['bs_weights'] = bs_weights
-            assert len(bs_weights) == 52
-
-        with open(os.path.join(params_path, mean)) as f:
-            mean = torch.tensor([float(x.strip()) for x in f.readlines()])
-            timestep_dict['mean'] = mean
-            assert len(mean) == 3
-
-        if timestep in train_frames:
-            train_mesh_infos[timestep] = timestep_dict
-        if timestep in test_frames:
-            test_mesh_infos[timestep] = timestep_dict
-
-    return train_mesh_infos, test_mesh_infos
+        with open(file_path, 'r') as f:
+            parsed_param_tensor = torch.tensor([float(x.strip()) for x in f.readlines()])
+            param_dict[timestep] = parsed_param_tensor
+            assert len(parsed_param_tensor) == expected_param_dim
+    return param_dict
 
 
 def readSceneInfoForScannerWB(source_path, images_folder_name, centroid, rescale_factor, val_cam_ids, train_frames, test_frames, eval):
@@ -176,7 +155,7 @@ def readSceneInfoForScannerWB(source_path, images_folder_name, centroid, rescale
                                                                           centroid, rescale_factor, 
                                                                           val_cam_ids, train_frames, test_frames, eval)
 
-    train_mesh_params, test_mesh_params = readMeshParamsForFrames(source_path, train_frames, test_frames, eval)
+    mesh_params = readMeshParamsForTimesteps(source_path)
 
     nerf_normalization = getNerfppNorm(train_cam_infos)
 
@@ -185,8 +164,7 @@ def readSceneInfoForScannerWB(source_path, images_folder_name, centroid, rescale
                            val_cameras=val_cam_infos,
                            test_cameras=test_cam_infos,
                            nerf_normalization=nerf_normalization,
-                           train_meshes=train_mesh_params,
-                           test_meshes=test_mesh_params,
+                           meshes=mesh_params,
                            ply_path=None)
     return scene_info
 

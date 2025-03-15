@@ -34,6 +34,9 @@ class WBGaussianModel(GaussianModel):
         self.faces_uvs = self.wb_model.faces_uvs
         self.texture = self.wb_model.texture
 
+        # self.min_timestep = 4
+        # self.max_timestep = 499
+
         # binding is initialized once the mesh topology is known
         if self.binding is None:
             self.binding = torch.arange(len(self.wb_model.faces)).cuda()
@@ -73,16 +76,7 @@ class WBGaussianModel(GaussianModel):
         self.faces = faces
 
 
-    def save_ply(self, path):
-        super().save_ply(path)
-
-        npz_path = Path(path).parent / "model_params.npz"
-        params = {k: v.cpu().numpy() for k, v in self.model_params.items()}
-        np.savez(str(npz_path), **params)
-
-    def load_meshes(self, train_meshes, test_meshes, tgt_train_meshes, tgt_test_meshes):
-        meshes = {**train_meshes, **test_meshes}
-
+    def load_meshes(self, meshes):
         # needed for viewer gui
         self.num_timesteps = len(meshes)
         self.min_timestep = torch.min(torch.tensor([int(k) for k in meshes.keys()]))
@@ -142,3 +136,27 @@ class WBGaussianModel(GaussianModel):
         self.model_params['static_offset'].requires_grad = True
         param_static_offset = {'params': [self.model_params['static_offset']], 'lr': 1e-6, "name": "static_offset"}
         self.optimizer.add_param_group(param_static_offset)
+
+    def save_ply(self, path):
+        super().save_ply(path)
+
+        npz_path = Path(path).parent / "model_params.npz"
+        params = {k: v.cpu().numpy() for k, v in self.model_params.items()}
+        params["num_timesteps"] = np.array(self.num_timesteps)
+        params["min_timestep"] = np.array(self.min_timestep)
+        params["max_timestep"] = np.array(self.max_timestep)
+
+        np.savez(str(npz_path), **params)
+
+    def load_ply(self, path, **kwargs):
+        super().load_ply(path)
+
+        # Load rot scale trans learned in training
+        npz_path = Path(path).parent / "model_params.npz"
+        model_params = np.load(str(npz_path))
+        model_params = {k: torch.from_numpy(v).cuda() for k, v in model_params.items()
+                        if k not in ["num_timesteps", "min_timestep", "max_timestep"]}
+        self.model_params = model_params
+        self.num_timesteps = model_params['num_timesteps']
+        self.min_timestep = model_params['min_timestep']
+        self.max_timestep = model_params['max_timestep']
