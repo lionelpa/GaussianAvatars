@@ -153,10 +153,9 @@ class WBGaussianModel(GaussianModel):
 
         # Load rot scale trans learned in training
         npz_path = Path(path).parent / "model_params.npz"
-        model_params = np.load(str(npz_path))
-        model_params = {k: torch.from_numpy(v).cuda() for k, v in model_params.items()
+        params = np.load(str(npz_path))
+        self.model_params = {k: torch.from_numpy(v).cuda() for k, v in params.items()
                         if k not in ["num_timesteps", "min_timestep", "max_timestep"]}
-        self.model_params = model_params
-        self.num_timesteps = model_params['num_timesteps']
-        self.min_timestep = model_params['min_timestep']
-        self.max_timestep = model_params['max_timestep']
+        self.num_timesteps = int(params['num_timesteps'])
+        self.min_timestep = int(params['min_timestep'])
+        self.max_timestep = int(params['max_timestep'])
