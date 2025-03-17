@@ -7,7 +7,7 @@ tensorboard
 fvcore
 iopath
 plyfile
-tyro
+tyro==0.8.10
 dearpygui
 roma
 git+https://github.com/NVlabs/nvdiffrast

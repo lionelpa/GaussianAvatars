@@ -15,6 +15,8 @@ from roma import rotmat_to_unitquat, quat_xyzw_to_wxyz
 from utils.graphics_utils import compute_face_orientation
 from wb_model.wb import WBModel
 from .gaussian_model import GaussianModel
+from pytorch3d.structures import Meshes
+from utils.pytorch3d import mesh_laplacian_smoothing_per_vertex
 
 
 class WBGaussianModel(GaussianModel):
@@ -46,7 +48,7 @@ class WBGaussianModel(GaussianModel):
     def select_mesh_by_timestep(self, timestep, original=False):
         self.timestep = timestep
 
-        verts = self.wb_model(
+        verts, verts_canonical = self.wb_model(
             timestep=timestep,
             rotation=self.model_params['mesh_rotation'][timestep],
             translation=self.model_params['mesh_translation'][timestep],
@@ -56,9 +58,9 @@ class WBGaussianModel(GaussianModel):
             static_offset=self.model_params['static_offset'],
         )
         
-        self.update_mesh_properties(verts)
+        self.update_mesh_properties(verts, verts_canonical)
 
-    def update_mesh_properties(self, verts):
+    def update_mesh_properties(self, verts, verts_cano):
         faces = self.wb_model.faces
         triangles = verts[:, faces]
 
@@ -74,6 +76,9 @@ class WBGaussianModel(GaussianModel):
         # for mesh rendering
         self.verts = verts
         self.faces = faces
+
+        # for mesh regularization (e.g. laplacian loss)
+        self.verts_cano = verts_cano
 
 
     def load_meshes(self, meshes):
@@ -106,6 +111,26 @@ class WBGaussianModel(GaussianModel):
 
         for k, v in self.model_params.items():
             self.model_params[k] = v.float().cuda()
+
+    def compute_static_offset_laplacian_mse_loss(self):
+        v = self.verts.squeeze() 
+        v_cano = self.verts_cano.squeeze()
+        f = self.faces
+
+        mesh = Meshes(verts=[v], faces=[f])
+        mesh_cano = Meshes(verts=[v_cano], faces=[f])
+
+        lap = mesh_laplacian_smoothing_per_vertex(mesh, "cot") # nverts x 3
+        lap_cano = mesh_laplacian_smoothing_per_vertex(mesh_cano, "cot") # nverts x 3
+
+        lap = lap.norm(dim=-1)
+        lap_cano = lap_cano.norm(dim=-1)
+
+        lap_sq_err = (lap - lap_cano) ** 2
+        lap_mse = torch.mean(lap_sq_err) 
+
+        return lap_mse
+
 
     def training_setup(self, training_args):
         super().training_setup(training_args)

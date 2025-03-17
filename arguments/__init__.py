@@ -112,6 +112,7 @@ class OptimizationParams(ParamGroup):
         self.lambda_dynamic_offset = 0.
         self.lambda_laplacian = 0.
         self.lambda_dynamic_offset_std = 0  #1.
+        self.lambda_static_offset_laplacian = 0
 
         super().__init__(parser, "Optimization Parameters")
 

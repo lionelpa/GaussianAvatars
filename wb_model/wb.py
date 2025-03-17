@@ -8,10 +8,7 @@ from PIL import Image
 
 from utils.pytorch3d import euler_angles_to_matrix
 
-try:
-    from pytorch3d.io import load_obj
-except ImportError:
-    from utils.pytorch3d_load_obj import load_obj, save_obj
+from utils.pytorch3d_load_obj import load_obj, save_obj
 
 ROOT = "/home/lionel.azevedo/data/wb_scanner" # "/home/lio/PycharmProjects/data/scanner_wb/video"
 WB_HEAD_BASE_MESH_PATH     = ROOT + "/smooth2/0_head_nicolas_neutral.obj"
@@ -139,19 +136,21 @@ class WBModel(nn.Module):
         weighted_bs = (w_0 * bs).sum(1) + head_neutral_centered_v
 
         # combine with eyes
-        full_expr_v = torch.cat([weighted_bs, eyes_neutral_centered_v], dim=1)
-        full_expr_v = full_expr_v + static_offset
+        verts_full_cano = torch.cat([weighted_bs, eyes_neutral_centered_v], dim=1)
+        verts_full_with_static_offset = verts_full_cano + static_offset
 
         # transform
         matrix_R = euler_angles_to_matrix(R_0, "XYZ")
-        rotated_pred = (torch.bmm(s_0 * (full_expr_v - mean), matrix_R)) + mean + t_0
+        rotated_pred_cano = (torch.bmm(s_0 * (verts_full_cano - mean), matrix_R)) + mean + t_0
+        rotated_pred = (torch.bmm(s_0 * (verts_full_with_static_offset - mean), matrix_R)) + mean + t_0
 
         # center and scale
         centroid = self.raw_mesh_centroid.unsqueeze(0)
+        rotated_pred_cano = self.rescale_factor * (rotated_pred_cano - centroid)
         rotated_pred = self.rescale_factor * (rotated_pred - centroid)
         # save_obj(f"./output/A_{timestep}_maxim.obj", verts=rotated_pred[0], faces=self.faces)
 
-        return rotated_pred
+        return rotated_pred, rotated_pred_cano
 
 
 if __name__ == '__main__':

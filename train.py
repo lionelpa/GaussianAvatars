@@ -186,6 +186,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         
             if opt.lambda_laplacian != 0:
                 losses['lap'] = gaussians.compute_laplacian_loss() * opt.lambda_laplacian
+
+            # custom
+            if opt.lambda_static_offset_laplacian != 0:
+                losses["static_offset_lap"] = gaussians.compute_static_offset_laplacian_mse_loss() * opt.lambda_static_offset_laplacian
         
         losses['total'] = sum([v for k, v in losses.items()])
         losses['total'].backward()
@@ -276,6 +280,9 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
             tb_writer.add_scalar('train_loss_patches/laplacian', losses['laplacian'].item(), iteration)
         if 'dynamic_offset_std' in losses:
             tb_writer.add_scalar('train_loss_patches/dynamic_offset_std', losses['dynamic_offset_std'].item(), iteration)
+        if 'static_offset_lap' in losses:
+            tb_writer.add_scalar('train_loss_patches/static_offset_lap_mse', losses['static_offset_lap'].item(), iteration)
+
         tb_writer.add_scalar('train_loss_patches/total_loss', losses['total'].item(), iteration)
         tb_writer.add_scalar('iter_time', elapsed, iteration)
 
@@ -371,8 +378,10 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
 
         # render train
         visible_cams = [0,3,12,13]
-        for idx, viewpoint in tqdm(enumerate(DataLoader(scene.getTrainCameras(), shuffle=False, batch_size=None, num_workers=8))):
+        mesh_cam = 13
+        for idx, viewpoint in tqdm(enumerate(DataLoader(scene.getTrainCameras(), shuffle=False, batch_size=None, num_workers=8)), total=len(scene.getTrainCameras())):
             if tb_writer and viewpoint.timestep % 12 == 0 and viewpoint.colmap_id in visible_cams:
+                scene.gaussians.select_mesh_by_timestep(viewpoint.timestep)
                 image = torch.clamp(renderFunc(viewpoint, scene.gaussians, *renderArgs)["render"], 0.0, 1.0)
                 gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
                 tb_writer.add_images(f"train_c{viewpoint.colmap_id}_t{viewpoint.timestep}/render", image[None],
@@ -383,6 +392,16 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
                 if iteration == testing_iterations[0]:
                     tb_writer.add_images(f"train_c{viewpoint.colmap_id}_t{viewpoint.timestep}/ground_truth", gt_image[None],
                                          global_step=iteration)
+                #render mesh to visualize offsets
+                if viewpoint.colmap_id == mesh_cam:
+                    # export mesh render
+                    out_dict = mesh_renderer.render_from_camera(scene.gaussians.verts, scene.gaussians.faces, viewpoint)
+                    rgba_mesh = out_dict['rgba'].squeeze(0)  # (H, W, C)
+                    rgb_mesh = rgba_mesh[:, :, :3]
+                    image=rgb_mesh.permute(2,0,1)
+                    tb_writer.add_images(f"1_mesh/mesh_c{viewpoint.colmap_id}_t{viewpoint.timestep}", image[None],
+                                     global_step=iteration)
+                    
 
         torch.cuda.empty_cache()
 
