@@ -7,8 +7,7 @@ import torch.nn as nn
 from PIL import Image
 
 from utils.pytorch3d import euler_angles_to_matrix
-
-from utils.pytorch3d_load_obj import load_obj, save_obj
+from utils.pytorch3d_load_obj import load_obj
 
 ROOT = "/home/lionel.azevedo/data/wb_scanner" # "/home/lio/PycharmProjects/data/scanner_wb/video"
 WB_HEAD_BASE_MESH_PATH     = ROOT + "/smooth2/0_head_nicolas_neutral.obj"
@@ -114,7 +113,7 @@ class WBModel(nn.Module):
                     assert False, f"Could not read {blendshape_file_path}\n{e}"
         return torch.vstack(shapes), shapes_names
 
-    def forward(self, translation, rotation, scale, blendshape_weights, timestep, mean, static_offset):
+    def forward(self, translation, rotation, scale, blendshape_weights, timestep, mean, static_offset, dynamic_offset):
         # apply only to head
         w_0 = blendshape_weights.unsqueeze(0)
         t_0 = translation.unsqueeze(0)
@@ -122,6 +121,7 @@ class WBModel(nn.Module):
         s_0 = scale.unsqueeze(0)
         bs = self.shapes.unsqueeze(0)
         static_offset = static_offset.unsqueeze(0)
+        dynamic_offset = dynamic_offset.unsqueeze(0)
         mean = mean.unsqueeze(0)
 
         # Transformations applied to reconstruct face and align with cameras are done on an already centered
@@ -137,12 +137,20 @@ class WBModel(nn.Module):
 
         # combine with eyes
         verts_full_cano = torch.cat([weighted_bs, eyes_neutral_centered_v], dim=1)
-        verts_full_with_static_offset = verts_full_cano + static_offset
+
+        # apply static offset
+        verts_full_with_offset = verts_full_cano + static_offset
+
+        # apply dynamic offset based on bs
+        # dyn_offset = 1 x B x V x 3
+        if dynamic_offset is not None:
+            dyn = (w_0 * dynamic_offset).sum(1)
+            verts_full_with_offset = verts_full_with_offset + dyn
 
         # transform
         matrix_R = euler_angles_to_matrix(R_0, "XYZ")
         rotated_pred_cano = (torch.bmm(s_0 * (verts_full_cano - mean), matrix_R)) + mean + t_0
-        rotated_pred = (torch.bmm(s_0 * (verts_full_with_static_offset - mean), matrix_R)) + mean + t_0
+        rotated_pred = (torch.bmm(s_0 * (verts_full_with_offset - mean), matrix_R)) + mean + t_0
 
         # center and scale
         centroid = self.raw_mesh_centroid.unsqueeze(0)

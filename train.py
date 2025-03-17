@@ -301,6 +301,9 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
             tb_writer.add_scalar('transform/static_offset',
                                  torch.linalg.vector_norm(scene.gaussians.model_params['static_offset']),
                                  iteration)
+            tb_writer.add_scalar('transform/dynamic_offset_sum',
+                                 scene.gaussians.model_params['dynamic_offset'].norm(dim=-1).sum(),
+                                 iteration)
 
     # if tb_writer:
     #     for viewpoint in scene.getValCameras():

@@ -10,13 +10,13 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from pytorch3d.structures import Meshes
 from roma import rotmat_to_unitquat, quat_xyzw_to_wxyz
 
 from utils.graphics_utils import compute_face_orientation
+from utils.pytorch3d import mesh_laplacian_smoothing_per_vertex
 from wb_model.wb import WBModel
 from .gaussian_model import GaussianModel
-from pytorch3d.structures import Meshes
-from utils.pytorch3d import mesh_laplacian_smoothing_per_vertex
 
 
 class WBGaussianModel(GaussianModel):
@@ -56,6 +56,7 @@ class WBGaussianModel(GaussianModel):
             blendshape_weights=self.model_params['bs_weights'][timestep],
             mean=self.model_params['mesh_mean'][timestep],
             static_offset=self.model_params['static_offset'],
+            dynamic_offset=self.model_params['dynamic_offset'],
         )
         
         self.update_mesh_properties(verts, verts_canonical)
@@ -90,6 +91,8 @@ class WBGaussianModel(GaussianModel):
         T = self.max_timestep + 1
         print("Max timestep", T)
 
+        num_verts = self.wb_model.verts.shape[0]
+
         # create model params to be saved for model reloading
         # if train and test frames are not continuous (have gaps) the tensor entries are 0s
         self.model_params = {
@@ -100,6 +103,7 @@ class WBGaussianModel(GaussianModel):
             'bs_weights': torch.zeros([T, list(meshes.values())[0]['bs_weights'].shape[0]]),
             'mesh_mean': torch.ones([T, 3]),
             'static_offset': torch.zeros_like(self.wb_model.verts),
+            'dynamic_offset': torch.zeros(list(meshes.values())[0]['bs_weights'].shape[0], num_verts, 3),
         }
 
         for timestep, mesh in meshes.items():
@@ -161,6 +165,11 @@ class WBGaussianModel(GaussianModel):
         self.model_params['static_offset'].requires_grad = True
         param_static_offset = {'params': [self.model_params['static_offset']], 'lr': 1e-6, "name": "static_offset"}
         self.optimizer.add_param_group(param_static_offset)
+
+        # dynamic_offset
+        self.model_params['dynamic_offset'].requires_grad = True
+        param_dynamic_offset = {'params': [self.model_params['dynamic_offset']], 'lr': 1e-6, "name": "dynamic_offset"}
+        self.optimizer.add_param_group(param_dynamic_offset)
 
     def save_ply(self, path):
         super().save_ply(path)
