@@ -149,16 +149,16 @@ class WBModel(nn.Module):
 
         # transform
         matrix_R = euler_angles_to_matrix(R_0, "XYZ")
-        rotated_pred_cano = (torch.bmm(s_0 * (verts_full_cano - mean), matrix_R)) + mean + t_0
+        # rotated_pred_cano = (torch.bmm(s_0 * (verts_full_cano - mean), matrix_R)) + mean + t_0
         rotated_pred = (torch.bmm(s_0 * (verts_full_with_offset - mean), matrix_R)) + mean + t_0
 
         # center and scale
         centroid = self.raw_mesh_centroid.unsqueeze(0)
-        rotated_pred_cano = self.rescale_factor * (rotated_pred_cano - centroid)
+        # rotated_pred_cano = self.rescale_factor * (rotated_pred_cano - centroid)
         rotated_pred = self.rescale_factor * (rotated_pred - centroid)
         # save_obj(f"./output/A_{timestep}_maxim.obj", verts=rotated_pred[0], faces=self.faces)
 
-        return rotated_pred, rotated_pred_cano
+        return rotated_pred, None #rotated_pred_cano
 
 
 if __name__ == '__main__':

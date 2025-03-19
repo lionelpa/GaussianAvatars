@@ -95,7 +95,7 @@ class Scene:
             scene_info = sceneLoadTypeCallbacks["ScannerWB"](args.source_path, args.images,
                                                              gaussians.raw_mesh_centroid.cpu().numpy(),
                                                              float(gaussians.rescale_factor),
-                                                             {8}, set(range(195,250)), set(range(400, 401)), args.eval)
+                                                             {8}, set(range(4,400)), set(range(400, 500, 10)), args.eval)
         # elif os.path.exists(os.path.join(args.source_path, "sparse")):
         #     scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval)
         # elif os.path.exists(os.path.join(args.source_path, "canonical_flame_param.npz")):
@@ -170,6 +170,9 @@ class Scene:
 
     def getTrainCameras(self, scale=1.0):
         return CameraDataset(self.train_cameras[scale])
+    
+    def getTrainCamerasWithIds(self, ids, scale=1.0):
+        return CameraDataset([c for c in self.train_cameras[scale] if c.colmap_id in ids])
     
     def getValCameras(self, scale=1.0):
         return CameraDataset(self.val_cameras[scale])

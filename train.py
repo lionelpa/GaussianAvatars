@@ -36,7 +36,7 @@ try:
 except ImportError:
     TENSORBOARD_FOUND = False
 
-def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
+def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, render_meshes_iterations):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     if dataset.bind_to_mesh:
@@ -189,7 +189,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
             # custom
             if opt.lambda_static_offset_laplacian != 0:
-                losses["static_offset_lap"] = gaussians.compute_static_offset_laplacian_mse_loss() * opt.lambda_static_offset_laplacian
+                losses["offset_lap"] = gaussians.compute_offset_laplacian_mse_loss() * opt.lambda_static_offset_laplacian
+            if opt.lambda_offset_norm != 0:
+                losses["offset_norm"] = gaussians.compute_offset_loss() * opt.lambda_offset_norm
         
         losses['total'] = sum([v for k, v in losses.items()])
         losses['total'].backward()
@@ -217,7 +219,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 progress_bar.close()
 
             # Log and save
-            training_report(tb_writer, iteration, losses, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background), mesh_renderer)
+            training_report(tb_writer, iteration, losses, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background), mesh_renderer, render_meshes_iterations)
             if (iteration in saving_iterations):
                 print("[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
@@ -266,7 +268,7 @@ def prepare_output_and_logger(args):
         print("Tensorboard not available: not logging progress")
     return tb_writer
 
-def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs, mesh_renderer):
+def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs, mesh_renderer, render_meshes_iterations):
     if tb_writer:
         tb_writer.add_scalar('train_loss_patches/l1_loss', losses['l1'].item(), iteration)
         tb_writer.add_scalar('train_loss_patches/ssim_loss', losses['ssim'].item(), iteration)
@@ -280,28 +282,30 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
             tb_writer.add_scalar('train_loss_patches/laplacian', losses['laplacian'].item(), iteration)
         if 'dynamic_offset_std' in losses:
             tb_writer.add_scalar('train_loss_patches/dynamic_offset_std', losses['dynamic_offset_std'].item(), iteration)
-        if 'static_offset_lap' in losses:
-            tb_writer.add_scalar('train_loss_patches/static_offset_lap_mse', losses['static_offset_lap'].item(), iteration)
+        if 'offset_lap' in losses:
+            tb_writer.add_scalar('train_loss_patches/offset_lap_mse', losses['offset_lap'].item(), iteration)
+        if 'offset_norm' in losses:
+            tb_writer.add_scalar('train_loss_patches/offset_norm', losses['offset_norm'].item(), iteration)
 
         tb_writer.add_scalar('train_loss_patches/total_loss', losses['total'].item(), iteration)
         tb_writer.add_scalar('iter_time', elapsed, iteration)
 
         if iteration % 100 == 0:
             tb_writer.add_scalar('transform/rotation',
-                                 torch.linalg.vector_norm(scene.gaussians.model_params['mesh_rotation'].sum(dim=0)),
+                                 scene.gaussians.model_params['mesh_rotation'].norm(dim=-1).sum(),
                                  iteration)
             tb_writer.add_scalar('transform/scale',
-                                 torch.linalg.vector_norm(scene.gaussians.model_params['mesh_scale'].sum(dim=0)), iteration)
+                                 scene.gaussians.model_params['mesh_scale'].norm(dim=-1).sum(), iteration)
             tb_writer.add_scalar('transform/translation',
-                                 torch.linalg.vector_norm(scene.gaussians.model_params['mesh_translation'].sum(dim=0)),
+                                 scene.gaussians.model_params['mesh_translation'].norm(dim=-1).sum(),
                                  iteration)
             tb_writer.add_scalar('transform/bs_weights',
-                                 torch.linalg.vector_norm(scene.gaussians.model_params['bs_weights'].sum()),
+                                 scene.gaussians.model_params['bs_weights'].abs().sum(),
                                  iteration)
-            tb_writer.add_scalar('transform/static_offset',
-                                 torch.linalg.vector_norm(scene.gaussians.model_params['static_offset']),
+            tb_writer.add_scalar('transform/static_offset_norm_sum',
+                                 scene.gaussians.model_params['static_offset'].norm(),
                                  iteration)
-            tb_writer.add_scalar('transform/dynamic_offset_sum',
+            tb_writer.add_scalar('transform/dynamic_offset_norm_sum',
                                  scene.gaussians.model_params['dynamic_offset'].norm(dim=-1).sum(),
                                  iteration)
 
@@ -379,32 +383,63 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - ssim', ssim_test, iteration)
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - lpips', lpips_test, iteration)
 
-        # render train
-        visible_cams = [0,3,12,13]
-        mesh_cam = 13
-        for idx, viewpoint in tqdm(enumerate(DataLoader(scene.getTrainCameras(), shuffle=False, batch_size=None, num_workers=8)), total=len(scene.getTrainCameras())):
-            if tb_writer and viewpoint.timestep % 12 == 0 and viewpoint.colmap_id in visible_cams:
-                scene.gaussians.select_mesh_by_timestep(viewpoint.timestep)
-                image = torch.clamp(renderFunc(viewpoint, scene.gaussians, *renderArgs)["render"], 0.0, 1.0)
-                gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
-                tb_writer.add_images(f"train_c{viewpoint.colmap_id}_t{viewpoint.timestep}/render", image[None],
-                                     global_step=iteration)
-                error_image = error_map(image, gt_image)
-                tb_writer.add_images(f"train_c{viewpoint.colmap_id}_t{viewpoint.timestep}/error", error_image[None],
-                                     global_step=iteration)
-                if iteration == testing_iterations[0]:
-                    tb_writer.add_images(f"train_c{viewpoint.colmap_id}_t{viewpoint.timestep}/ground_truth", gt_image[None],
-                                         global_step=iteration)
+    visible_train_cams = [0,3,12,13]
+    mesh_cam = 13
+    mesh_gt_overlay_cams = [2, 0, 13, 14, 12] # displayed in tb in same order from left to right
+    mesh_gt_overlay_timestep = 223
+    n = 100
+    if tb_writer and (iteration in render_meshes_iterations or iteration in testing_iterations):
+        # iterate once
+        mesh_overlay_images = dict()
+        relevant_cams = scene.getTrainCamerasWithIds(visible_train_cams + [mesh_cam] + mesh_gt_overlay_cams)
+        for idx, viewpoint in tqdm(enumerate(DataLoader(relevant_cams, shuffle=False, batch_size=None, num_workers=8)), total=len(relevant_cams), desc=f"[ITER {iteration}] Rendering train, meshes and mesh overlays..."):
+            scene.gaussians.select_mesh_by_timestep(viewpoint.timestep)
+            # render train
+            if iteration in testing_iterations:
+                if viewpoint.colmap_id in visible_train_cams and viewpoint.timestep % n == 0:
+                    image = torch.clamp(renderFunc(viewpoint, scene.gaussians, *renderArgs)["render"], 0.0, 1.0)
+                    gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
+                    tb_writer.add_images(f"train_c{viewpoint.colmap_id}_t{viewpoint.timestep}/render", image[None],
+                                        global_step=iteration)
+                    error_image = error_map(image, gt_image)
+                    tb_writer.add_images(f"train_c{viewpoint.colmap_id}_t{viewpoint.timestep}/error", error_image[None],
+                                        global_step=iteration)
+                    if iteration == testing_iterations[0]:
+                        tb_writer.add_images(f"train_c{viewpoint.colmap_id}_t{viewpoint.timestep}/ground_truth", gt_image[None],
+                                            global_step=iteration)
+            # render gt overlaid with mesh
+            if iteration in render_meshes_iterations:
                 #render mesh to visualize offsets
-                if viewpoint.colmap_id == mesh_cam:
+                if viewpoint.colmap_id == mesh_cam and viewpoint.timestep % n == 0:
                     # export mesh render
                     out_dict = mesh_renderer.render_from_camera(scene.gaussians.verts, scene.gaussians.faces, viewpoint)
                     rgba_mesh = out_dict['rgba'].squeeze(0)  # (H, W, C)
                     rgb_mesh = rgba_mesh[:, :, :3]
                     image=rgb_mesh.permute(2,0,1)
                     tb_writer.add_images(f"1_mesh/mesh_c{viewpoint.colmap_id}_t{viewpoint.timestep}", image[None],
-                                     global_step=iteration)
-                    
+                                    global_step=iteration)
+                if viewpoint.colmap_id in mesh_gt_overlay_cams and viewpoint.timestep == mesh_gt_overlay_timestep:
+                    # get gt image
+                    gt_image = viewpoint.original_image  # Assuming this is a PIL image or convertible
+                    gt_image = gt_image.permute(1, 2, 0).cuda()
+
+                    # get mesh image
+                    out_dict = mesh_renderer.render_from_camera(scene.gaussians.verts, scene.gaussians.faces, viewpoint)
+                    rgba_mesh = out_dict['rgba'].squeeze(0)  # (H, W, C)
+                    rgb_mesh = rgba_mesh[:, :, :3]
+                    alpha_mesh = rgba_mesh[:, :, 3:]
+                    mesh_opacity = torch.tensor(0.5)
+
+                    # aplpha blend
+                    final = rgb_mesh * alpha_mesh * mesh_opacity + gt_image * (alpha_mesh * (1 - mesh_opacity) + (1 - alpha_mesh))
+                    final = final.permute(2,0,1)
+                    # final = Image.fromarray((final * 255).clip(0, 255).cpu().numpy().astype(np.uint8))
+                    # tb_writer.add_images(f"1_mesh/1_overlay_c{viewpoint.colmap_id}_t{viewpoint.timestep}", final[None],
+                    #                     global_step=iteration)
+                    mesh_overlay_images[viewpoint.colmap_id] = final
+        mesh_overlay_images = [mesh_overlay_images[k] for k in mesh_gt_overlay_cams]
+        tb_writer.add_images(f"1_mesh/1_overlay_c{mesh_gt_overlay_cams}_t{mesh_gt_overlay_timestep}", torch.stack(mesh_overlay_images)
+                             , global_step=iteration)
 
         torch.cuda.empty_cache()
 
@@ -443,6 +478,8 @@ if __name__ == "__main__":
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
+    # custom
+    parser.add_argument("--render_meshes_iterations", nargs="+", type=int, default=[])
     args = parser.parse_args(sys.argv[1:])
 
     if args.interval > op.iterations:
@@ -453,9 +490,13 @@ if __name__ == "__main__":
         args.save_iterations.extend(list(range(args.interval, args.iterations+1, args.interval)))
     if len(args.checkpoint_iterations) == 0:
         args.checkpoint_iterations.extend(list(range(args.interval, args.iterations+1, args.interval)))
+    # custom
+    if len(args.render_meshes_iterations) == 0:
+        args.render_meshes_iterations.extend(list(range(args.interval, args.iterations+1, args.interval)))
     
-    args.test_iterations = [1, 500, 1000, 5000, 10000, 20000, 30000] + args.test_iterations
-    args.save_iterations = [1] + args.save_iterations
+    args.test_iterations          = [1, 1000, 5000, 10000, 20000, 30000] + args.test_iterations
+    args.save_iterations          = [1] + args.save_iterations
+    args.render_meshes_iterations = [1, 500, 1000, 2000, 5000, 10000, 15000, 20000, 25000 , 30000] + args.render_meshes_iterations
 
     print("Optimizing " + args.model_path)
 
@@ -476,7 +517,8 @@ if __name__ == "__main__":
         args.save_iterations, 
         args.checkpoint_iterations, 
         args.start_checkpoint, 
-        args.debug_from)
+        args.debug_from,
+        args.render_meshes_iterations)
 
     # All done
     print("\nTraining complete.")

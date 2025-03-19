@@ -116,60 +116,41 @@ class WBGaussianModel(GaussianModel):
         for k, v in self.model_params.items():
             self.model_params[k] = v.float().cuda()
 
-    def compute_static_offset_laplacian_mse_loss(self):
-        v = self.verts.squeeze() 
-        v_cano = self.verts_cano.squeeze()
-        f = self.faces
-
-        mesh = Meshes(verts=[v], faces=[f])
-        mesh_cano = Meshes(verts=[v_cano], faces=[f])
-
-        lap = mesh_laplacian_smoothing_per_vertex(mesh, "cot") # nverts x 3
-        lap_cano = mesh_laplacian_smoothing_per_vertex(mesh_cano, "cot") # nverts x 3
-
-        lap = lap.norm(dim=-1)
-        lap_cano = lap_cano.norm(dim=-1)
-
-        lap_sq_err = (lap - lap_cano) ** 2
-        lap_mse = torch.mean(lap_sq_err) 
-
-        return lap_mse
-
 
     def training_setup(self, training_args):
         super().training_setup(training_args)
 
         # rotation
         self.model_params['mesh_rotation'].requires_grad = True
-        param_rotation = {'params': [self.model_params['mesh_rotation']], 'lr': training_args.flame_pose_lr, "name": "mesh_rotation"}
+        param_rotation = {'params': [self.model_params['mesh_rotation']], 'lr': training_args.rot_lr, "name": "mesh_rotation"}
         self.optimizer.add_param_group(param_rotation)
 
         # translation
         self.model_params['mesh_translation'].requires_grad = True
-        param_translation = {'params': [self.model_params['mesh_translation']], 'lr': training_args.flame_trans_lr,
+        param_translation = {'params': [self.model_params['mesh_translation']], 'lr': training_args.trans_lr,
                              "name": "mesh_translation"}
         self.optimizer.add_param_group(param_translation)
 
         # scale
         self.model_params['mesh_scale'].requires_grad = True
-        param_translation = {'params': [self.model_params['mesh_scale']], 'lr': training_args.flame_pose_lr,
+        param_translation = {'params': [self.model_params['mesh_scale']], 'lr': training_args.scale_lr,
                              "name": "mesh_scale"}
         self.optimizer.add_param_group(param_translation)
 
         # expression
         self.model_params['bs_weights'].requires_grad = True
-        param_bs_weights = {'params': [self.model_params['bs_weights']], 'lr': training_args.flame_expr_lr, "name": "bs_weights"}
+        param_bs_weights = {'params': [self.model_params['bs_weights']], 'lr': training_args.bs_lr, "name": "bs_weights"}
         self.optimizer.add_param_group(param_bs_weights)
 
-        # static_offset
-        self.model_params['static_offset'].requires_grad = True
-        param_static_offset = {'params': [self.model_params['static_offset']], 'lr': 1e-6, "name": "static_offset"}
-        self.optimizer.add_param_group(param_static_offset)
+        # # static_offset
+        # self.model_params['static_offset'].requires_grad = True
+        # param_static_offset = {'params': [self.model_params['static_offset']], 'lr': 1e-6, "name": "static_offset"}
+        # self.optimizer.add_param_group(param_static_offset)
 
-        # dynamic_offset
-        self.model_params['dynamic_offset'].requires_grad = True
-        param_dynamic_offset = {'params': [self.model_params['dynamic_offset']], 'lr': 1e-6, "name": "dynamic_offset"}
-        self.optimizer.add_param_group(param_dynamic_offset)
+        # # dynamic_offset
+        # self.model_params['dynamic_offset'].requires_grad = True
+        # param_dynamic_offset = {'params': [self.model_params['dynamic_offset']], 'lr': 1e-6, "name": "dynamic_offset"}
+        # self.optimizer.add_param_group(param_dynamic_offset)
 
     def save_ply(self, path):
         super().save_ply(path)
@@ -193,3 +174,37 @@ class WBGaussianModel(GaussianModel):
         self.num_timesteps = int(params['num_timesteps'])
         self.min_timestep = int(params['min_timestep'])
         self.max_timestep = int(params['max_timestep'])
+
+
+    def compute_offset_laplacian_mse_loss(self):
+        v = self.verts.squeeze() 
+        v_cano = self.verts_cano.squeeze()
+        f = self.faces
+
+        mesh = Meshes(verts=[v], faces=[f])
+        mesh_cano = Meshes(verts=[v_cano], faces=[f])
+
+        lap = mesh_laplacian_smoothing_per_vertex(mesh, "cot") # nverts x 3
+        lap_cano = mesh_laplacian_smoothing_per_vertex(mesh_cano, "cot") # nverts x 3
+
+        lap = lap.norm(dim=-1)
+        lap_cano = lap_cano.norm(dim=-1)
+
+        lap_sq_err = (lap - lap_cano) ** 2
+        lap_mse = torch.mean(lap_sq_err) 
+
+        return lap_mse
+    
+    def compute_offset_loss(self):
+        total_offset = self.model_params["static_offset"] +  self.get_dynamic_offset()
+        return total_offset.norm(dim=-1).sum()
+
+    def get_dynamic_offset(self):
+        x = self.model_params["dynamic_offset"]
+        w_0 = self.model_params["bs_weights"][self.timestep].unsqueeze(0)
+        w_0 = w_0.reshape(*(w_0.shape), 1, 1)
+        dyn = (w_0 * x).sum(1)[0]
+
+        return dyn
+
+
