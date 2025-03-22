@@ -98,9 +98,9 @@ class OptimizationParams(ParamGroup):
         self.densify_grad_threshold = 0.0002
         
         # GaussianAvatars
-        # self.flame_expr_lr = 1e-3
-        # self.flame_trans_lr = 1e-6
-        # self.flame_pose_lr = 1e-5
+        self.flame_expr_lr = 1e-3
+        self.flame_trans_lr = 1e-6
+        self.flame_pose_lr = 1e-5
         self.percent_dense = 0.01
         self.lambda_dssim = 0.2
         self.lambda_xyz = 1e-2
@@ -119,6 +119,8 @@ class OptimizationParams(ParamGroup):
         self.rot_lr = 1e-5 
         self.scale_lr = 1e-5
         self.bs_lr = 1e-3 
+        self.reposition_until = 10000
+        self.reset_interval = 2000
  
         super().__init__(parser, "Optimization Parameters")
 

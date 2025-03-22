@@ -17,6 +17,7 @@ from utils.graphics_utils import compute_face_orientation
 from utils.pytorch3d import mesh_laplacian_smoothing_per_vertex
 from wb_model.wb import WBModel
 from .gaussian_model import GaussianModel
+from utils.general_utils import inverse_sigmoid, get_expon_lr_func
 
 
 class WBGaussianModel(GaussianModel):
@@ -115,31 +116,37 @@ class WBGaussianModel(GaussianModel):
 
         for k, v in self.model_params.items():
             self.model_params[k] = v.float().cuda()
+        
+        self._bs_weights_original = self.model_params["bs_weights"].clone()
 
 
     def training_setup(self, training_args):
         super().training_setup(training_args)
-
-        # rotation
-        self.model_params['mesh_rotation'].requires_grad = True
-        param_rotation = {'params': [self.model_params['mesh_rotation']], 'lr': training_args.rot_lr, "name": "mesh_rotation"}
-        self.optimizer.add_param_group(param_rotation)
+        trans_lr = training_args.trans_lr
+        rot_lr = training_args.rot_lr
+        scale_lr = training_args.scale_lr
+        bs_lr = training_args.bs_lr
 
         # translation
         self.model_params['mesh_translation'].requires_grad = True
-        param_translation = {'params': [self.model_params['mesh_translation']], 'lr': training_args.trans_lr,
+        param_translation = {'params': [self.model_params['mesh_translation']], 'lr': trans_lr,
                              "name": "mesh_translation"}
         self.optimizer.add_param_group(param_translation)
 
+        # rotation
+        self.model_params['mesh_rotation'].requires_grad = True
+        param_rotation = {'params': [self.model_params['mesh_rotation']], 'lr': rot_lr, "name": "mesh_rotation"}
+        self.optimizer.add_param_group(param_rotation)
+
         # scale
         self.model_params['mesh_scale'].requires_grad = True
-        param_translation = {'params': [self.model_params['mesh_scale']], 'lr': training_args.scale_lr,
+        param_translation = {'params': [self.model_params['mesh_scale']], 'lr': scale_lr,
                              "name": "mesh_scale"}
         self.optimizer.add_param_group(param_translation)
 
         # expression
         self.model_params['bs_weights'].requires_grad = True
-        param_bs_weights = {'params': [self.model_params['bs_weights']], 'lr': training_args.bs_lr, "name": "bs_weights"}
+        param_bs_weights = {'params': [self.model_params['bs_weights']], 'lr': bs_lr, "name": "bs_weights"}
         self.optimizer.add_param_group(param_bs_weights)
 
         # # static_offset
@@ -151,6 +158,32 @@ class WBGaussianModel(GaussianModel):
         # self.model_params['dynamic_offset'].requires_grad = True
         # param_dynamic_offset = {'params': [self.model_params['dynamic_offset']], 'lr': 1e-6, "name": "dynamic_offset"}
         # self.optimizer.add_param_group(param_dynamic_offset)
+
+        self.trans_scheduler_args = get_expon_lr_func(lr_init=trans_lr,
+                                                    lr_final= training_args.flame_trans_lr,
+                                                    max_steps=training_args.reposition_until)
+        self.rot_scheduler_args = get_expon_lr_func(lr_init=rot_lr,
+                                                    lr_final= training_args.flame_pose_lr,
+                                                    max_steps=training_args.reposition_until)
+        self.scale_scheduler_args = get_expon_lr_func(lr_init=scale_lr,
+                                                    lr_final= training_args.flame_pose_lr,
+                                                    max_steps=training_args.reposition_until)
+                                                    
+
+    def update_learning_rate(self, iteration):
+        super().update_learning_rate(iteration)
+        ''' Learning rate scheduling per step '''
+        
+        for param_group in self.optimizer.param_groups:
+            if param_group["name"] == "mesh_translation":
+                lr = self.trans_scheduler_args(iteration)
+                param_group['lr'] = lr
+            elif param_group["name"] == "mesh_rotation":
+                lr = self.rot_scheduler_args(iteration)
+                param_group['lr'] = lr
+            elif param_group["name"] == "mesh_scale":
+                lr = self.scale_scheduler_args(iteration)
+                param_group['lr'] = lr
 
     def save_ply(self, path):
         super().save_ply(path)
@@ -206,5 +239,70 @@ class WBGaussianModel(GaussianModel):
         dyn = (w_0 * x).sum(1)[0]
 
         return dyn
+
+    def reset_gaussian_params(self):
+        num_pts = self.binding.shape[0]
+        
+        # reset xyz
+        xyz_new = torch.zeros((num_pts, 3)).float().cuda()
+        optimizable_tensors = self.replace_tensor_to_optimizer(xyz_new, "xyz")
+        self._xyz = optimizable_tensors["xyz"]
+
+        # reset color
+        self.active_sh_degree = 0
+
+        optimizable_tensors = self.replace_tensor_to_optimizer(self._features_dc_original.clone(), "f_dc")
+        self._features_dc = optimizable_tensors["f_dc"]
+
+        optimizable_tensors = self.replace_tensor_to_optimizer(self._features_rest_original.clone(), "f_rest")
+        self._features_rest = optimizable_tensors["f_rest"]
+
+        # reset bs_weights
+        optimizable_tensors = self.replace_tensor_to_optimizer(self._bs_weights_original.clone(), "bs_weights")
+        self.model_params["bs_weights"] = optimizable_tensors["bs_weights"]
+    
+    def reset_all(self, training_args):
+        num_pts = self.binding.shape[0]
+        
+        # reset xyz
+        xyz_new = torch.zeros((num_pts, 3)).float().cuda()
+        optimizable_tensors = self.replace_tensor_to_optimizer(xyz_new, "xyz")
+        self._xyz = optimizable_tensors["xyz"]
+
+        # reset rot
+        optimizable_tensors = self.replace_tensor_to_optimizer(self._rotation_original.clone(), "rotation")
+        self._scaling = optimizable_tensors["rotation"]
+
+        # reset scale
+        optimizable_tensors = self.replace_tensor_to_optimizer(self._scaling_original.clone(), "scaling")
+        self._scaling = optimizable_tensors["scaling"]
+
+        # reset color
+        self.active_sh_degree = 0
+
+        optimizable_tensors = self.replace_tensor_to_optimizer(self._features_dc_original.clone(), "f_dc")
+        self._features_dc = optimizable_tensors["f_dc"]
+
+        optimizable_tensors = self.replace_tensor_to_optimizer(self._features_rest_original.clone(), "f_rest")
+        self._features_rest = optimizable_tensors["f_rest"]
+
+        # reset opacity
+        optimizable_tensors = self.replace_tensor_to_optimizer(self._opacity_original, "opacity")
+        self._opacity = optimizable_tensors["opacity"]
+
+        # reset bs_weights
+        optimizable_tensors = self.replace_tensor_to_optimizer(self._bs_weights_original.clone(), "bs_weights")
+        self.model_params["bs_weights"] = optimizable_tensors["bs_weights"]
+
+        # reset LR scheduler for xyz 
+        # when this is called we are at iteration "training_args.reposition_until"
+        def mock_reset_scheduler_lr_func(iteration):
+            helper = get_expon_lr_func(lr_init=training_args.position_lr_init*self.spatial_lr_scale,
+                                                    lr_final=training_args.position_lr_final*self.spatial_lr_scale,
+                                                    lr_delay_mult=training_args.position_lr_delay_mult,
+                                                    max_steps=training_args.position_lr_max_steps - training_args.reposition_until) #this way and
+            return helper(iteration - training_args.reposition_until) # this way we shift from 10000-600000 to 0-590000
+        self.xyz_scheduler_args = mock_reset_scheduler_lr_func
+        print(f"FROM 0 TO {training_args.position_lr_max_steps - training_args.reposition_until} (590000)")
 
 

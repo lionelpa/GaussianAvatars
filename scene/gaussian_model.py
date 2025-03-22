@@ -193,7 +193,7 @@ class GaussianModel:
         self._xyz = nn.Parameter(fused_point_cloud.requires_grad_(True))
         self._features_dc = nn.Parameter(features[:,:,0:1].transpose(1, 2).contiguous().requires_grad_(True))
         self._features_rest = nn.Parameter(features[:,:,1:].transpose(1, 2).contiguous().requires_grad_(True))
-        print("Number of points at initialisation: ", self.get_xyz.shape[0])
+        print("Number of points/tris at initialisation: ", self.get_xyz.shape[0])
 
         if self.binding is None:
             dist2 = torch.clamp_min(distCUDA2(self.get_xyz), 0.0000001)
@@ -212,6 +212,14 @@ class GaussianModel:
         self._rotation = nn.Parameter(rots.requires_grad_(True))
         self._opacity = nn.Parameter(opacities.requires_grad_(True))
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
+
+        self._xyz_original = self._xyz.clone()
+        self._features_dc_original = self._features_dc.clone()
+        self._features_rest_original = self._features_rest.clone()
+        self._scaling_original = self._scaling.clone()
+        self._rotation_original = self._rotation.clone()
+        self._opacity_original = self._opacity.clone()
+
 
     def training_setup(self, training_args):
         self.percent_dense = training_args.percent_dense

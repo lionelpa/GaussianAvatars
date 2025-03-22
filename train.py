@@ -132,6 +132,13 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         gaussians.update_learning_rate(iteration)
 
+        if iteration <= opt.reposition_until and iteration % opt.reset_interval == 0:
+            gaussians.reset_gaussian_params()
+            if iteration == opt.reposition_until:
+                gaussians.reset_all(opt)
+                print(f"[ITER {iteration}] FULL RESET")
+            print(f"[ITER {iteration}] Reset gaussian params!")
+
         # Every 1000 its we increase the levels of SH up to a maximum degree
         if iteration % 1000 == 0:
             gaussians.oneupSHdegree()
@@ -270,42 +277,42 @@ def prepare_output_and_logger(args):
 
 def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs, mesh_renderer, render_meshes_iterations):
     if tb_writer:
-        tb_writer.add_scalar('train_loss_patches/l1_loss', losses['l1'].item(), iteration)
-        tb_writer.add_scalar('train_loss_patches/ssim_loss', losses['ssim'].item(), iteration)
+        tb_writer.add_scalar('1_train_loss_patches/l1_loss', losses['l1'].item(), iteration)
+        tb_writer.add_scalar('1_train_loss_patches/ssim_loss', losses['ssim'].item(), iteration)
         if 'xyz' in losses:
-            tb_writer.add_scalar('train_loss_patches/xyz_loss', losses['xyz'].item(), iteration)
+            tb_writer.add_scalar('1_train_loss_patches/xyz_loss', losses['xyz'].item(), iteration)
         if 'scale' in losses:
-            tb_writer.add_scalar('train_loss_patches/scale_loss', losses['scale'].item(), iteration)
+            tb_writer.add_scalar('1_train_loss_patches/scale_loss', losses['scale'].item(), iteration)
         if 'dynamic_offset' in losses:
-            tb_writer.add_scalar('train_loss_patches/dynamic_offset', losses['dynamic_offset'].item(), iteration)
+            tb_writer.add_scalar('1_train_loss_patches/dynamic_offset', losses['dynamic_offset'].item(), iteration)
         if 'laplacian' in losses:
-            tb_writer.add_scalar('train_loss_patches/laplacian', losses['laplacian'].item(), iteration)
+            tb_writer.add_scalar('1_train_loss_patches/laplacian', losses['laplacian'].item(), iteration)
         if 'dynamic_offset_std' in losses:
-            tb_writer.add_scalar('train_loss_patches/dynamic_offset_std', losses['dynamic_offset_std'].item(), iteration)
+            tb_writer.add_scalar('1_train_loss_patches/dynamic_offset_std', losses['dynamic_offset_std'].item(), iteration)
         if 'offset_lap' in losses:
-            tb_writer.add_scalar('train_loss_patches/offset_lap_mse', losses['offset_lap'].item(), iteration)
+            tb_writer.add_scalar('1_train_loss_patches/offset_lap_mse', losses['offset_lap'].item(), iteration)
         if 'offset_norm' in losses:
-            tb_writer.add_scalar('train_loss_patches/offset_norm', losses['offset_norm'].item(), iteration)
+            tb_writer.add_scalar('1_train_loss_patches/offset_norm', losses['offset_norm'].item(), iteration)
 
-        tb_writer.add_scalar('train_loss_patches/total_loss', losses['total'].item(), iteration)
+        tb_writer.add_scalar('1_train_loss_patches/total_loss', losses['total'].item(), iteration)
         tb_writer.add_scalar('iter_time', elapsed, iteration)
 
         if iteration % 100 == 0:
-            tb_writer.add_scalar('transform/rotation',
+            tb_writer.add_scalar('1_transform/rotation',
                                  scene.gaussians.model_params['mesh_rotation'].norm(dim=-1).sum(),
                                  iteration)
-            tb_writer.add_scalar('transform/scale',
+            tb_writer.add_scalar('1_transform/scale',
                                  scene.gaussians.model_params['mesh_scale'].norm(dim=-1).sum(), iteration)
-            tb_writer.add_scalar('transform/translation',
+            tb_writer.add_scalar('1_transform/translation',
                                  scene.gaussians.model_params['mesh_translation'].norm(dim=-1).sum(),
                                  iteration)
-            tb_writer.add_scalar('transform/bs_weights',
+            tb_writer.add_scalar('1_transform/bs_weights',
                                  scene.gaussians.model_params['bs_weights'].abs().sum(),
                                  iteration)
-            tb_writer.add_scalar('transform/static_offset_norm_sum',
+            tb_writer.add_scalar('1_transform/static_offset_norm_sum',
                                  scene.gaussians.model_params['static_offset'].norm(),
                                  iteration)
-            tb_writer.add_scalar('transform/dynamic_offset_norm_sum',
+            tb_writer.add_scalar('1_transform/dynamic_offset_norm_sum',
                                  scene.gaussians.model_params['dynamic_offset'].norm(dim=-1).sum(),
                                  iteration)
 
@@ -383,14 +390,14 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - ssim', ssim_test, iteration)
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - lpips', lpips_test, iteration)
 
-    visible_train_cams = [0,3,12,13]
+    visible_train_cams = [2, 0, 13, 14, 12]
     mesh_cam = 13
     mesh_gt_overlay_cams = [2, 0, 13, 14, 12] # displayed in tb in same order from left to right
-    mesh_gt_overlay_timestep = 223
+    mesh_gt_overlay_timesteps = [4, 223]
     n = 100
     if tb_writer and (iteration in render_meshes_iterations or iteration in testing_iterations):
         # iterate once
-        mesh_overlay_images = dict()
+        mesh_overlay_images = {t:dict() for t in mesh_gt_overlay_timesteps}
         relevant_cams = scene.getTrainCamerasWithIds(visible_train_cams + [mesh_cam] + mesh_gt_overlay_cams)
         for idx, viewpoint in tqdm(enumerate(DataLoader(relevant_cams, shuffle=False, batch_size=None, num_workers=8)), total=len(relevant_cams), desc=f"[ITER {iteration}] Rendering train, meshes and mesh overlays..."):
             scene.gaussians.select_mesh_by_timestep(viewpoint.timestep)
@@ -418,7 +425,7 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
                     image=rgb_mesh.permute(2,0,1)
                     tb_writer.add_images(f"1_mesh/mesh_c{viewpoint.colmap_id}_t{viewpoint.timestep}", image[None],
                                     global_step=iteration)
-                if viewpoint.colmap_id in mesh_gt_overlay_cams and viewpoint.timestep == mesh_gt_overlay_timestep:
+                if viewpoint.colmap_id in mesh_gt_overlay_cams and viewpoint.timestep in mesh_gt_overlay_timesteps:
                     # get gt image
                     gt_image = viewpoint.original_image  # Assuming this is a PIL image or convertible
                     gt_image = gt_image.permute(1, 2, 0).cuda()
@@ -436,10 +443,12 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
                     # final = Image.fromarray((final * 255).clip(0, 255).cpu().numpy().astype(np.uint8))
                     # tb_writer.add_images(f"1_mesh/1_overlay_c{viewpoint.colmap_id}_t{viewpoint.timestep}", final[None],
                     #                     global_step=iteration)
-                    mesh_overlay_images[viewpoint.colmap_id] = final
-        mesh_overlay_images = [mesh_overlay_images[k] for k in mesh_gt_overlay_cams]
-        tb_writer.add_images(f"1_mesh/1_overlay_c{mesh_gt_overlay_cams}_t{mesh_gt_overlay_timestep}", torch.stack(mesh_overlay_images)
-                             , global_step=iteration)
+                    mesh_overlay_images[viewpoint.timestep][viewpoint.colmap_id] = final
+        
+        for t, image_dict in mesh_overlay_images.items():
+            images = [image_dict[k] for k in mesh_gt_overlay_cams]
+            tb_writer.add_images(f"1_mesh/1_overlay_c{mesh_gt_overlay_cams}_t{t}", torch.stack(images)
+                                , global_step=iteration)
 
         torch.cuda.empty_cache()
 
@@ -494,9 +503,11 @@ if __name__ == "__main__":
     if len(args.render_meshes_iterations) == 0:
         args.render_meshes_iterations.extend(list(range(args.interval, args.iterations+1, args.interval)))
     
-    args.test_iterations          = [1, 1000, 5000, 10000, 20000, 30000] + args.test_iterations
+    args.test_iterations          = [1] + list(range(0, 10001, op.densification_interval//2)) + [12000, 15000, 20000, 30000, 70000, 80000, 100000] + args.test_iterations
+    # args.test_iterations          = [1, 1000, 5000, 10000, 20000, 30000] + args.test_iterations
     args.save_iterations          = [1] + args.save_iterations
-    args.render_meshes_iterations = [1, 500, 1000, 2000, 5000, 10000, 15000, 20000, 25000 , 30000] + args.render_meshes_iterations
+    args.render_meshes_iterations = [1] + list(range(0, 10001, op.densification_interval//2)) + [12000, 15000, 20000, 30000, 70000, 80000, 100000]  + args.render_meshes_iterations
+    # args.render_meshes_iterations = [1, 500, 1000, 2000, 5000, 10000, 15000, 20000, 25000 , 30000] + args.render_meshes_iterations
 
     print("Optimizing " + args.model_path)
 
