@@ -47,6 +47,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     scene = Scene(dataset, gaussians)
     # gaussians.save_ply_for_SIBR(f"{dataset.model_path}/_init_gaussians.ply", scene, render_debug_origin=True)
     gaussians.training_setup(opt)
+    if opt.reposition_until > 0:
+        if opt.fixate_xyz_during_repos:
+            gaussians.deactivate_xyz_learning()
+        if opt.dont_learn_bs_during_repos:
+            gaussians.deactivate_bs_learning()
 
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
@@ -132,12 +137,20 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         gaussians.update_learning_rate(iteration)
 
-        if iteration <= opt.reposition_until and iteration % opt.reset_interval == 0:
-            gaussians.reset_gaussian_params()
-            if iteration == opt.reposition_until:
+        # if we need to reset regularly during alignment phase
+        if opt.reposition_until > 0:
+            if iteration < opt.reposition_until and opt.reset_interval > 0 and iteration % opt.reset_interval == 0:
+                gaussians.reset_gaussian_params()
+                print(f"[ITER {iteration}] Reset gaussian params!")
+            elif iteration == (opt.reposition_until + 1):
                 gaussians.reset_all(opt)
                 print(f"[ITER {iteration}] FULL RESET")
-            print(f"[ITER {iteration}] Reset gaussian params!")
+                if opt.fixate_xyz_during_repos: # make learnable after repos phase
+                    gaussians.activate_xyz_learning(opt)
+                if opt.dont_learn_bs_during_repos: # make learnable after repos phase
+                    gaussians.activate_bs_learning(opt)
+                gaussians.update_learning_rate(iteration)
+
 
         # Every 1000 its we increase the levels of SH up to a maximum degree
         if iteration % 1000 == 0:
@@ -393,7 +406,7 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
     visible_train_cams = [2, 0, 13, 14, 12]
     mesh_cam = 13
     mesh_gt_overlay_cams = [2, 0, 13, 14, 12] # displayed in tb in same order from left to right
-    mesh_gt_overlay_timesteps = [4, 223]
+    mesh_gt_overlay_timesteps = [4, 223, 100, 200, 300, 400] # train only
     n = 100
     if tb_writer and (iteration in render_meshes_iterations or iteration in testing_iterations):
         # iterate once
@@ -445,10 +458,12 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
                     #                     global_step=iteration)
                     mesh_overlay_images[viewpoint.timestep][viewpoint.colmap_id] = final
         
-        for t, image_dict in mesh_overlay_images.items():
-            images = [image_dict[k] for k in mesh_gt_overlay_cams]
-            tb_writer.add_images(f"1_mesh/1_overlay_c{mesh_gt_overlay_cams}_t{t}", torch.stack(images)
-                                , global_step=iteration)
+        if iteration in render_meshes_iterations:
+            for t, image_dict in mesh_overlay_images.items():
+                if len(image_dict) != 0: # if the timestep is not in train cams and thus no img were generated
+                    images = [image_dict[k] for k in mesh_gt_overlay_cams]
+                    tb_writer.add_images(f"1_mesh/1_overlay_c{mesh_gt_overlay_cams}_t{t}", torch.stack(images)
+                                        , global_step=iteration)
 
         torch.cuda.empty_cache()
 
@@ -503,10 +518,10 @@ if __name__ == "__main__":
     if len(args.render_meshes_iterations) == 0:
         args.render_meshes_iterations.extend(list(range(args.interval, args.iterations+1, args.interval)))
     
-    args.test_iterations          = [1] + list(range(0, 10001, op.densification_interval//2)) + [12000, 15000, 20000, 30000, 70000, 80000, 100000] + args.test_iterations
+    args.test_iterations          = [1] + list(range(0, 10001, op.densification_interval//2)) + [10000, 12000, 15000, 20000, 30000, 70000, 80000, 100000] + args.test_iterations
     # args.test_iterations          = [1, 1000, 5000, 10000, 20000, 30000] + args.test_iterations
     args.save_iterations          = [1] + args.save_iterations
-    args.render_meshes_iterations = [1] + list(range(0, 10001, op.densification_interval//2)) + [12000, 15000, 20000, 30000, 70000, 80000, 100000]  + args.render_meshes_iterations
+    args.render_meshes_iterations = [1] + list(range(0, 10001, op.densification_interval//2)) + [10000, 12000, 15000, 20000, 30000, 70000, 80000, 100000]  + args.render_meshes_iterations
     # args.render_meshes_iterations = [1, 500, 1000, 2000, 5000, 10000, 15000, 20000, 25000 , 30000] + args.render_meshes_iterations
 
     print("Optimizing " + args.model_path)

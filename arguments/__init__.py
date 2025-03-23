@@ -119,8 +119,10 @@ class OptimizationParams(ParamGroup):
         self.rot_lr = 1e-5 
         self.scale_lr = 1e-5
         self.bs_lr = 1e-3 
-        self.reposition_until = 10000
-        self.reset_interval = 2000
+        self.reposition_until = -1
+        self.reset_interval = -1
+        self.fixate_xyz_during_repos = False
+        self.dont_learn_bs_during_repos = False
  
         super().__init__(parser, "Optimization Parameters")
 

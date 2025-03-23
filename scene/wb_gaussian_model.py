@@ -54,6 +54,7 @@ class WBGaussianModel(GaussianModel):
             rotation=self.model_params['mesh_rotation'][timestep],
             translation=self.model_params['mesh_translation'][timestep],
             scale=self.model_params['mesh_scale'][timestep],
+            global_scale=self.model_params['global_mesh_scale'],
             blendshape_weights=self.model_params['bs_weights'][timestep],
             mean=self.model_params['mesh_mean'][timestep],
             static_offset=self.model_params['static_offset'],
@@ -97,12 +98,13 @@ class WBGaussianModel(GaussianModel):
         # create model params to be saved for model reloading
         # if train and test frames are not continuous (have gaps) the tensor entries are 0s
         self.model_params = {
-            'center_and_scale': torch.tensor(int(self.center_and_scale)),
-            'mesh_rotation': torch.zeros([T, 3]),
             'mesh_translation': torch.zeros([T, 3]),
-            'mesh_scale': torch.ones([T, 3]),
+            'mesh_rotation': torch.zeros([T, 3]),
+            'mesh_scale': torch.ones([T, 3]), # loaded per frame, not learned
             'bs_weights': torch.zeros([T, list(meshes.values())[0]['bs_weights'].shape[0]]),
             'mesh_mean': torch.ones([T, 3]),
+            'center_and_scale': torch.tensor(int(self.center_and_scale)),
+            'global_mesh_scale': torch.ones([3]), # learned scale (global! not per frame)
             'static_offset': torch.zeros_like(self.wb_model.verts),
             'dynamic_offset': torch.zeros(list(meshes.values())[0]['bs_weights'].shape[0], num_verts, 3),
         }
@@ -138,11 +140,11 @@ class WBGaussianModel(GaussianModel):
         param_rotation = {'params': [self.model_params['mesh_rotation']], 'lr': rot_lr, "name": "mesh_rotation"}
         self.optimizer.add_param_group(param_rotation)
 
-        # scale
-        self.model_params['mesh_scale'].requires_grad = True
-        param_translation = {'params': [self.model_params['mesh_scale']], 'lr': scale_lr,
-                             "name": "mesh_scale"}
-        self.optimizer.add_param_group(param_translation)
+        # global scale (not per frame)
+        self.model_params['global_mesh_scale'].requires_grad = True
+        param_global_scale = {'params': [self.model_params['global_mesh_scale']], 'lr': scale_lr,
+                             "name": "global_mesh_scale"}
+        self.optimizer.add_param_group(param_global_scale)
 
         # expression
         self.model_params['bs_weights'].requires_grad = True
@@ -181,7 +183,7 @@ class WBGaussianModel(GaussianModel):
             elif param_group["name"] == "mesh_rotation":
                 lr = self.rot_scheduler_args(iteration)
                 param_group['lr'] = lr
-            elif param_group["name"] == "mesh_scale":
+            elif param_group["name"] == "global_mesh_scale":
                 lr = self.scale_scheduler_args(iteration)
                 param_group['lr'] = lr
 
@@ -295,14 +297,41 @@ class WBGaussianModel(GaussianModel):
         self.model_params["bs_weights"] = optimizable_tensors["bs_weights"]
 
         # reset LR scheduler for xyz 
+        self.activate_xyz_learning(training_args)
+
+    def activate_xyz_learning(self, training_args):
         # when this is called we are at iteration "training_args.reposition_until"
-        def mock_reset_scheduler_lr_func(iteration):
+        def mock_reset_scheduler_lr_func(step):
             helper = get_expon_lr_func(lr_init=training_args.position_lr_init*self.spatial_lr_scale,
                                                     lr_final=training_args.position_lr_final*self.spatial_lr_scale,
                                                     lr_delay_mult=training_args.position_lr_delay_mult,
                                                     max_steps=training_args.position_lr_max_steps - training_args.reposition_until) #this way and
-            return helper(iteration - training_args.reposition_until) # this way we shift from 10000-600000 to 0-590000
+            return helper(step - training_args.reposition_until) # this way we shift from 10000-600000 to 0-590000
         self.xyz_scheduler_args = mock_reset_scheduler_lr_func
-        print(f"FROM 0 TO {training_args.position_lr_max_steps - training_args.reposition_until} (590000)")
+        # print(f"FROM 0 TO {training_args.position_lr_max_steps - training_args.reposition_until} (590000)")
+        print(f"[ACTIVATE] Successfully updated lr scheduler for xyz!")
+
+    def deactivate_xyz_learning(self):
+        def zero_func(step):
+            return 0
+        self.xyz_scheduler_args = zero_func
+        print(f"[DEACTIVATE] Successfully set xyz_scheduler to zero_func!")
+    
+    def activate_bs_learning(self, training_args):
+        # when this is called we are at iteration "training_args.reposition_until"
+        for param_group in self.optimizer.param_groups:
+            if param_group["name"] == "bs_weights":
+                param_group['lr'] = training_args.bs_lr
+                print(f"[ACTIVATE] Successfully set lr for bs_weights to {training_args.bs_lr}!")
+                return
+        raise Exception("Could not activate bs_weights lr!")
+
+    def deactivate_bs_learning(self):
+        for param_group in self.optimizer.param_groups:
+            if param_group["name"] == "bs_weights":
+                param_group['lr'] = 0
+                print(f"[DEACTIVATE] Successfully set lr for bs_weights to zero!")
+                return
+        raise Exception("Could not deactivate bs_weights lr!")
 
 

@@ -113,12 +113,13 @@ class WBModel(nn.Module):
                     assert False, f"Could not read {blendshape_file_path}\n{e}"
         return torch.vstack(shapes), shapes_names
 
-    def forward(self, translation, rotation, scale, blendshape_weights, timestep, mean, static_offset, dynamic_offset):
+    def forward(self, translation, rotation, scale, global_scale, blendshape_weights, timestep, mean, static_offset, dynamic_offset):
         # apply only to head
         w_0 = blendshape_weights.unsqueeze(0)
         t_0 = translation.unsqueeze(0)
         R_0 = rotation.unsqueeze(0)
         s_0 = scale.unsqueeze(0)
+        gs_0 = global_scale.unsqueeze(0)
         bs = self.shapes.unsqueeze(0)
         static_offset = static_offset.unsqueeze(0)
         dynamic_offset = dynamic_offset.unsqueeze(0)
@@ -149,8 +150,8 @@ class WBModel(nn.Module):
 
         # transform
         matrix_R = euler_angles_to_matrix(R_0, "XYZ")
-        # rotated_pred_cano = (torch.bmm(s_0 * (verts_full_cano - mean), matrix_R)) + mean + t_0
-        rotated_pred = (torch.bmm(s_0 * (verts_full_with_offset - mean), matrix_R)) + mean + t_0
+        # rotated_pred_cano = (torch.bmm(gs_0 * (s_0 * (verts_full_cano - mean), matrix_R))) + mean + t_0
+        rotated_pred = (torch.bmm(gs_0 * (s_0 * (verts_full_with_offset - mean)), matrix_R)) + mean + t_0
 
         # center and scale
         centroid = self.raw_mesh_centroid.unsqueeze(0)
