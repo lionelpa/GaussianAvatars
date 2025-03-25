@@ -55,7 +55,7 @@ class WBGaussianModel(GaussianModel):
             translation=self.model_params['mesh_translation'][timestep],
             scale=self.model_params['mesh_scale'][timestep],
             global_scale=self.model_params['global_mesh_scale'],
-            blendshape_weights=self.model_params['bs_weights'][timestep],
+            blendshape_weights=self.model_params['bs_weights'][timestep] + self.model_params['add_bs_weights'][timestep],
             mean=self.model_params['mesh_mean'][timestep],
             static_offset=self.model_params['static_offset'],
             dynamic_offset=self.model_params['dynamic_offset'],
@@ -101,7 +101,8 @@ class WBGaussianModel(GaussianModel):
             'mesh_translation': torch.zeros([T, 3]),
             'mesh_rotation': torch.zeros([T, 3]),
             'mesh_scale': torch.ones([T, 3]), # loaded per frame, not learned
-            'bs_weights': torch.zeros([T, list(meshes.values())[0]['bs_weights'].shape[0]]),
+            'bs_weights': torch.zeros([T, list(meshes.values())[0]['bs_weights'].shape[0]]), # loaded
+            'add_bs_weights': torch.zeros([T, list(meshes.values())[0]['bs_weights'].shape[0]]), # learned
             'mesh_mean': torch.ones([T, 3]),
             'center_and_scale': torch.tensor(int(self.center_and_scale)),
             'global_mesh_scale': torch.ones([3]), # learned scale (global! not per frame)
@@ -119,7 +120,8 @@ class WBGaussianModel(GaussianModel):
         for k, v in self.model_params.items():
             self.model_params[k] = v.float().cuda()
         
-        self._bs_weights_original = self.model_params["bs_weights"].clone()
+        self._add_bs_weights_original = self.model_params["add_bs_weights"].clone()
+        self._static_offset_original = self.model_params["static_offset"].clone()
 
 
     def training_setup(self, training_args):
@@ -128,6 +130,7 @@ class WBGaussianModel(GaussianModel):
         rot_lr = training_args.rot_lr
         scale_lr = training_args.scale_lr
         bs_lr = training_args.bs_lr
+        offset_lr = training_args.offset_lr
 
         # translation
         self.model_params['mesh_translation'].requires_grad = True
@@ -146,14 +149,14 @@ class WBGaussianModel(GaussianModel):
                              "name": "global_mesh_scale"}
         self.optimizer.add_param_group(param_global_scale)
 
-        # expression
-        self.model_params['bs_weights'].requires_grad = True
-        param_bs_weights = {'params': [self.model_params['bs_weights']], 'lr': bs_lr, "name": "bs_weights"}
+        # expression learned
+        self.model_params['add_bs_weights'].requires_grad = True
+        param_bs_weights = {'params': [self.model_params['add_bs_weights']], 'lr': bs_lr, "name": "add_bs_weights"}
         self.optimizer.add_param_group(param_bs_weights)
 
         # # static_offset
         # self.model_params['static_offset'].requires_grad = True
-        # param_static_offset = {'params': [self.model_params['static_offset']], 'lr': 1e-6, "name": "static_offset"}
+        # param_static_offset = {'params': [self.model_params['static_offset']], 'lr': offset_lr, "name": "static_offset"}
         # self.optimizer.add_param_group(param_static_offset)
 
         # # dynamic_offset
@@ -236,7 +239,8 @@ class WBGaussianModel(GaussianModel):
 
     def get_dynamic_offset(self):
         x = self.model_params["dynamic_offset"]
-        w_0 = self.model_params["bs_weights"][self.timestep].unsqueeze(0)
+        w_0 = self.model_params["bs_weights"][self.timestep] + self.model_params["add_bs_weights"][self.timestep]
+        w_0 = w_0.unsqueeze(0)
         w_0 = w_0.reshape(*(w_0.shape), 1, 1)
         dyn = (w_0 * x).sum(1)[0]
 
@@ -260,8 +264,8 @@ class WBGaussianModel(GaussianModel):
         self._features_rest = optimizable_tensors["f_rest"]
 
         # reset bs_weights
-        optimizable_tensors = self.replace_tensor_to_optimizer(self._bs_weights_original.clone(), "bs_weights")
-        self.model_params["bs_weights"] = optimizable_tensors["bs_weights"]
+        optimizable_tensors = self.replace_tensor_to_optimizer(self._add_bs_weights_original.clone(), "add_bs_weights")
+        self.model_params["add_bs_weights"] = optimizable_tensors["add_bs_weights"]
     
     def reset_all(self, training_args):
         num_pts = self.binding.shape[0]
@@ -293,8 +297,12 @@ class WBGaussianModel(GaussianModel):
         self._opacity = optimizable_tensors["opacity"]
 
         # reset bs_weights
-        optimizable_tensors = self.replace_tensor_to_optimizer(self._bs_weights_original.clone(), "bs_weights")
-        self.model_params["bs_weights"] = optimizable_tensors["bs_weights"]
+        optimizable_tensors = self.replace_tensor_to_optimizer(self._add_bs_weights_original.clone(), "add_bs_weights")
+        self.model_params["add_bs_weights"] = optimizable_tensors["add_bs_weights"]
+
+        # # reset static offsets
+        # optimizable_tensors = self.replace_tensor_to_optimizer(self._static_offset_original.clone(), "static_offset")
+        # self.model_params["static_offset"] = optimizable_tensors["static_offset"]
 
         # reset LR scheduler for xyz 
         self.activate_xyz_learning(training_args)
@@ -320,18 +328,18 @@ class WBGaussianModel(GaussianModel):
     def activate_bs_learning(self, training_args):
         # when this is called we are at iteration "training_args.reposition_until"
         for param_group in self.optimizer.param_groups:
-            if param_group["name"] == "bs_weights":
+            if param_group["name"] == "add_bs_weights":
                 param_group['lr'] = training_args.bs_lr
-                print(f"[ACTIVATE] Successfully set lr for bs_weights to {training_args.bs_lr}!")
+                print(f"[ACTIVATE] Successfully set lr for add_bs_weights to {training_args.bs_lr}!")
                 return
-        raise Exception("Could not activate bs_weights lr!")
+        raise Exception("Could not activate add_bs_weights lr!")
 
     def deactivate_bs_learning(self):
         for param_group in self.optimizer.param_groups:
-            if param_group["name"] == "bs_weights":
+            if param_group["name"] == "add_bs_weights":
                 param_group['lr'] = 0
-                print(f"[DEACTIVATE] Successfully set lr for bs_weights to zero!")
+                print(f"[DEACTIVATE] Successfully set lr for add_bs_weights to zero!")
                 return
-        raise Exception("Could not deactivate bs_weights lr!")
+        raise Exception("Could not deactivate add_bs_weights lr!")
 
 

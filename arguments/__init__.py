@@ -112,9 +112,10 @@ class OptimizationParams(ParamGroup):
         self.lambda_dynamic_offset = 0.
         self.lambda_laplacian = 0.
         self.lambda_dynamic_offset_std = 0  #1.
+
+        self.offset_lr = 1e-6
         self.lambda_offset_norm = 0.
         self.lambda_static_offset_laplacian = 0.
-
         self.trans_lr = 1e-6 
         self.rot_lr = 1e-5 
         self.scale_lr = 1e-5
@@ -123,6 +124,7 @@ class OptimizationParams(ParamGroup):
         self.reset_interval = -1
         self.fixate_xyz_during_repos = False
         self.dont_learn_bs_during_repos = False
+        self.lambda_bs_weights_norm = 0.
  
         super().__init__(parser, "Optimization Parameters")
 

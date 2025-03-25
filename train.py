@@ -212,6 +212,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 losses["offset_lap"] = gaussians.compute_offset_laplacian_mse_loss() * opt.lambda_static_offset_laplacian
             if opt.lambda_offset_norm != 0:
                 losses["offset_norm"] = gaussians.compute_offset_loss() * opt.lambda_offset_norm
+            if opt.lambda_bs_weights_norm != 0:
+                losses["add_bs_norm"] = gaussians.model_params['add_bs_weights'].norm(p=2) * opt.lambda_bs_weights_norm
+                # losses["add_bs_norm"] = gaussians.model_params['add_bs_weights'].norm(dim=-1).sum() * opt.lambda_bs_weights_norm
         
         losses['total'] = sum([v for k, v in losses.items()])
         losses['total'].backward()
@@ -293,7 +296,7 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
         tb_writer.add_scalar('1_train_loss_patches/l1_loss', losses['l1'].item(), iteration)
         tb_writer.add_scalar('1_train_loss_patches/ssim_loss', losses['ssim'].item(), iteration)
         if 'xyz' in losses:
-            tb_writer.add_scalar('1_train_loss_patches/xyz_loss', losses['xyz'].item(), iteration)
+            tb_writer.add_scalar('1_train_loss_patches/1_xyz_loss', losses['xyz'].item(), iteration)
         if 'scale' in losses:
             tb_writer.add_scalar('1_train_loss_patches/scale_loss', losses['scale'].item(), iteration)
         if 'dynamic_offset' in losses:
@@ -306,8 +309,14 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
             tb_writer.add_scalar('1_train_loss_patches/offset_lap_mse', losses['offset_lap'].item(), iteration)
         if 'offset_norm' in losses:
             tb_writer.add_scalar('1_train_loss_patches/offset_norm', losses['offset_norm'].item(), iteration)
+        if 'add_bs_norm' in losses:
+            tb_writer.add_scalar('1_train_loss_patches/add_bs_norm', losses['add_bs_norm'].item(), iteration)    
+
+        if 'add_bs_norm' in losses and 'xyz' in losses:
+            tb_writer.add_scalar('1_train_loss_patches/1_diff_xyz-bs', losses['xyz'].item() - losses['add_bs_norm'].item(), iteration)    
 
         tb_writer.add_scalar('1_train_loss_patches/total_loss', losses['total'].item(), iteration)
+        tb_writer.add_scalar('1_train_loss_patches/total_dssim+l1', losses['ssim'].item() + losses['l1'].item(), iteration)
         tb_writer.add_scalar('iter_time', elapsed, iteration)
 
         if iteration % 100 == 0:
@@ -316,11 +325,16 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
                                  iteration)
             tb_writer.add_scalar('1_transform/scale',
                                  scene.gaussians.model_params['mesh_scale'].norm(dim=-1).sum(), iteration)
+            tb_writer.add_scalar('1_transform/mesh_scale (global)',
+                                 scene.gaussians.model_params['global_mesh_scale'].norm(dim=-1).sum(), iteration)
             tb_writer.add_scalar('1_transform/translation',
                                  scene.gaussians.model_params['mesh_translation'].norm(dim=-1).sum(),
                                  iteration)
             tb_writer.add_scalar('1_transform/bs_weights',
                                  scene.gaussians.model_params['bs_weights'].abs().sum(),
+                                 iteration)
+            tb_writer.add_scalar('1_transform/bs_weights_abs_sum (learned)',
+                                 scene.gaussians.model_params['add_bs_weights'].abs().sum(),
                                  iteration)
             tb_writer.add_scalar('1_transform/static_offset_norm_sum',
                                  scene.gaussians.model_params['static_offset'].norm(),
@@ -518,10 +532,12 @@ if __name__ == "__main__":
     if len(args.render_meshes_iterations) == 0:
         args.render_meshes_iterations.extend(list(range(args.interval, args.iterations+1, args.interval)))
     
-    args.test_iterations          = [1] + list(range(0, 10001, op.densification_interval//2)) + [10000, 12000, 15000, 20000, 30000, 70000, 80000, 100000] + args.test_iterations
+    args.test_iterations          = [1] + [3000, 5000, 10000, 15000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 100000] + args.test_iterations
+    # args.test_iterations          = [1] + list(range(0, 10001, op.densification_interval//2)) + [10000, 12000, 15000, 20000, 30000, 70000, 80000, 100000] + args.test_iterations
     # args.test_iterations          = [1, 1000, 5000, 10000, 20000, 30000] + args.test_iterations
     args.save_iterations          = [1] + args.save_iterations
-    args.render_meshes_iterations = [1] + list(range(0, 10001, op.densification_interval//2)) + [10000, 12000, 15000, 20000, 30000, 70000, 80000, 100000]  + args.render_meshes_iterations
+    args.render_meshes_iterations = [1] + [3000, 5000, 10000, 15000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 100000]  + args.render_meshes_iterations
+    # args.render_meshes_iterations = [1] + list(range(0, 10001, op.densification_interval//2)) + [10000, 12000, 15000, 20000, 30000, 70000, 80000, 100000]  + args.render_meshes_iterations
     # args.render_meshes_iterations = [1, 500, 1000, 2000, 5000, 10000, 15000, 20000, 25000 , 30000] + args.render_meshes_iterations
 
     print("Optimizing " + args.model_path)
