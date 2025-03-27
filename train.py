@@ -192,9 +192,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     # losses['scale'] = F.relu(gaussians._scaling).norm(dim=1).mean() * opt.lambda_scale
                     losses['scale'] = F.relu(torch.exp(gaussians._scaling[visibility_filter]) - opt.threshold_scale).norm(dim=1).mean() * opt.lambda_scale
 
-            if opt.lambda_dynamic_offset != 0:
-                losses['dy_off'] = gaussians.compute_dynamic_offset_loss() * opt.lambda_dynamic_offset
-
             if opt.lambda_dynamic_offset_std != 0:
                 ti = viewpoint_cam.timestep
                 t_indices =[ti]
@@ -211,10 +208,17 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             if opt.lambda_static_offset_laplacian != 0:
                 losses["offset_lap"] = gaussians.compute_offset_laplacian_mse_loss() * opt.lambda_static_offset_laplacian
             if opt.lambda_offset_norm != 0:
-                losses["offset_norm"] = gaussians.compute_offset_loss() * opt.lambda_offset_norm
+                losses["offset_norm"] = gaussians.compute_offset_loss_L1() * opt.lambda_offset_norm
+                raise Exception("Possibly deprecated. Sure you want to use this?")
+            if opt.lambda_static_offset != 0:
+                losses["static_offset"] = gaussians.model_params["static_offset"].norm(p=2) * opt.lambda_static_offset 
             if opt.lambda_bs_weights_norm != 0:
                 losses["add_bs_norm"] = gaussians.model_params['add_bs_weights'].norm(p=2) * opt.lambda_bs_weights_norm
                 # losses["add_bs_norm"] = gaussians.model_params['add_bs_weights'].norm(dim=-1).sum() * opt.lambda_bs_weights_norm
+            if opt.lambda_dynamic_offset != 0:   # Lionel: cant use nießner cause our dyn works differently (does not depend on timestep)
+                losses['dynamic_offset'] = gaussians.model_params['dynamic_offset'].norm(p=2) * opt.lambda_dynamic_offset
+            if opt.lambda_offset_laplace_l2 != 0:   # Lionel: cant use nießner cause our dyn works differently (does not depend on timestep)
+                losses['offset_laplace_l2'] = gaussians.compute_offset_laplace_loss_L2() * opt.lambda_offset_laplace_l2
         
         losses['total'] = sum([v for k, v in losses.items()])
         losses['total'].backward()
@@ -299,8 +303,8 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
             tb_writer.add_scalar('1_train_loss_patches/1_xyz_loss', losses['xyz'].item(), iteration)
         if 'scale' in losses:
             tb_writer.add_scalar('1_train_loss_patches/scale_loss', losses['scale'].item(), iteration)
-        if 'dynamic_offset' in losses:
-            tb_writer.add_scalar('1_train_loss_patches/dynamic_offset', losses['dynamic_offset'].item(), iteration)
+        # if 'dynamic_offset' in losses:
+        #     tb_writer.add_scalar('1_train_loss_patches/dynamic_offset', losses['dynamic_offset'].item(), iteration)
         if 'laplacian' in losses:
             tb_writer.add_scalar('1_train_loss_patches/laplacian', losses['laplacian'].item(), iteration)
         if 'dynamic_offset_std' in losses:
@@ -311,9 +315,14 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
             tb_writer.add_scalar('1_train_loss_patches/offset_norm', losses['offset_norm'].item(), iteration)
         if 'add_bs_norm' in losses:
             tb_writer.add_scalar('1_train_loss_patches/add_bs_norm', losses['add_bs_norm'].item(), iteration)    
-
         if 'add_bs_norm' in losses and 'xyz' in losses:
-            tb_writer.add_scalar('1_train_loss_patches/1_diff_xyz-bs', losses['xyz'].item() - losses['add_bs_norm'].item(), iteration)    
+            tb_writer.add_scalar('1_train_loss_patches/1_diff_xyz-bs', losses['xyz'].item() - losses['add_bs_norm'].item(), iteration)   
+        if 'static_offset' in losses: 
+            tb_writer.add_scalar('1_train_loss_patches/static_offset_norm_mean', losses['static_offset'].item(), iteration) 
+        if 'dynamic_offset' in losses: 
+            tb_writer.add_scalar('1_train_loss_patches/dynamic_offset_norm_mean', losses['dynamic_offset'].item(), iteration)  
+        if 'offset_laplace_l2' in losses: 
+            tb_writer.add_scalar('1_train_loss_patches/offset_laplace_l2', losses['offset_laplace_l2'].item(), iteration)   
 
         tb_writer.add_scalar('1_train_loss_patches/total_loss', losses['total'].item(), iteration)
         tb_writer.add_scalar('1_train_loss_patches/total_dssim+l1', losses['ssim'].item() + losses['l1'].item(), iteration)
@@ -430,7 +439,7 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
             scene.gaussians.select_mesh_by_timestep(viewpoint.timestep)
             # render train
             if iteration in testing_iterations:
-                if viewpoint.colmap_id in visible_train_cams and viewpoint.timestep % n == 0:
+                if viewpoint.colmap_id in visible_train_cams and (viewpoint.timestep % n == 0 or viewpoint.timestep in mesh_gt_overlay_timesteps):
                     image = torch.clamp(renderFunc(viewpoint, scene.gaussians, *renderArgs)["render"], 0.0, 1.0)
                     gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
                     tb_writer.add_images(f"train_c{viewpoint.colmap_id}_t{viewpoint.timestep}/render", image[None],
@@ -438,39 +447,23 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
                     error_image = error_map(image, gt_image)
                     tb_writer.add_images(f"train_c{viewpoint.colmap_id}_t{viewpoint.timestep}/error", error_image[None],
                                         global_step=iteration)
+                    # export mesh render
+                    image = render_mesh(scene, viewpoint, mesh_renderer)
+                    tb_writer.add_images(f"train_c{viewpoint.colmap_id}_t{viewpoint.timestep}/mesh", image[None],
+                                    global_step=iteration)
+                    # mesh overlay
+                    image = render_mesh_overlay(scene, viewpoint, mesh_renderer)
+                    tb_writer.add_images(f"train_c{viewpoint.colmap_id}_t{viewpoint.timestep}/mesh_overlay", image[None],
+                                    global_step=iteration)
                     if iteration == testing_iterations[0]:
                         tb_writer.add_images(f"train_c{viewpoint.colmap_id}_t{viewpoint.timestep}/ground_truth", gt_image[None],
                                             global_step=iteration)
-            # render gt overlaid with mesh
+                    
+            # render wide illustration of gt overlaid with mesh
             if iteration in render_meshes_iterations:
-                #render mesh to visualize offsets
-                if viewpoint.colmap_id == mesh_cam and viewpoint.timestep % n == 0:
-                    # export mesh render
-                    out_dict = mesh_renderer.render_from_camera(scene.gaussians.verts, scene.gaussians.faces, viewpoint)
-                    rgba_mesh = out_dict['rgba'].squeeze(0)  # (H, W, C)
-                    rgb_mesh = rgba_mesh[:, :, :3]
-                    image=rgb_mesh.permute(2,0,1)
-                    tb_writer.add_images(f"1_mesh/mesh_c{viewpoint.colmap_id}_t{viewpoint.timestep}", image[None],
-                                    global_step=iteration)
                 if viewpoint.colmap_id in mesh_gt_overlay_cams and viewpoint.timestep in mesh_gt_overlay_timesteps:
-                    # get gt image
-                    gt_image = viewpoint.original_image  # Assuming this is a PIL image or convertible
-                    gt_image = gt_image.permute(1, 2, 0).cuda()
-
-                    # get mesh image
-                    out_dict = mesh_renderer.render_from_camera(scene.gaussians.verts, scene.gaussians.faces, viewpoint)
-                    rgba_mesh = out_dict['rgba'].squeeze(0)  # (H, W, C)
-                    rgb_mesh = rgba_mesh[:, :, :3]
-                    alpha_mesh = rgba_mesh[:, :, 3:]
-                    mesh_opacity = torch.tensor(0.5)
-
-                    # aplpha blend
-                    final = rgb_mesh * alpha_mesh * mesh_opacity + gt_image * (alpha_mesh * (1 - mesh_opacity) + (1 - alpha_mesh))
-                    final = final.permute(2,0,1)
-                    # final = Image.fromarray((final * 255).clip(0, 255).cpu().numpy().astype(np.uint8))
-                    # tb_writer.add_images(f"1_mesh/1_overlay_c{viewpoint.colmap_id}_t{viewpoint.timestep}", final[None],
-                    #                     global_step=iteration)
-                    mesh_overlay_images[viewpoint.timestep][viewpoint.colmap_id] = final
+                    image = render_mesh_overlay(scene, viewpoint, mesh_renderer)
+                    mesh_overlay_images[viewpoint.timestep][viewpoint.colmap_id] = image
         
         if iteration in render_meshes_iterations:
             for t, image_dict in mesh_overlay_images.items():
@@ -480,6 +473,33 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
                                         , global_step=iteration)
 
         torch.cuda.empty_cache()
+
+def render_mesh(scene, viewpoint, mesh_renderer):
+    out_dict = mesh_renderer.render_from_camera(scene.gaussians.verts, scene.gaussians.faces, viewpoint)
+    rgba_mesh = out_dict['rgba'].squeeze(0)  # (H, W, C)
+    rgb_mesh = rgba_mesh[:, :, :3]
+    image=rgb_mesh.permute(2,0,1)
+    return image
+    
+def render_mesh_overlay(scene, viewpoint, mesh_renderer):
+    # get gt image
+    gt_image = viewpoint.original_image  # Assuming this is a PIL image or convertible
+    gt_image = gt_image.permute(1, 2, 0).cuda()
+
+    # get mesh image
+    out_dict = mesh_renderer.render_from_camera(scene.gaussians.verts, scene.gaussians.faces, viewpoint)
+    rgba_mesh = out_dict['rgba'].squeeze(0)  # (H, W, C)
+    rgb_mesh = rgba_mesh[:, :, :3]
+    alpha_mesh = rgba_mesh[:, :, 3:]
+    mesh_opacity = torch.tensor(0.5)
+
+    # aplpha blend
+    final = rgb_mesh * alpha_mesh * mesh_opacity + gt_image * (alpha_mesh * (1 - mesh_opacity) + (1 - alpha_mesh))
+    final = final.permute(2,0,1)
+    # final = Image.fromarray((final * 255).clip(0, 255).cpu().numpy().astype(np.uint8))
+    # tb_writer.add_images(f"1_mesh/1_overlay_c{viewpoint.colmap_id}_t{viewpoint.timestep}", final[None],
+    #                     global_step=iteration)
+    return final
 
 def save_params_to_json(lp, op, pp, args, folder, filename="params_ga.json"):
     # Ensure the output folder exists
@@ -532,11 +552,12 @@ if __name__ == "__main__":
     if len(args.render_meshes_iterations) == 0:
         args.render_meshes_iterations.extend(list(range(args.interval, args.iterations+1, args.interval)))
     
-    args.test_iterations          = [1] + [3000, 5000, 10000, 15000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 100000] + args.test_iterations
+    args.test_iterations          = [1] + [5000, 10000, 20000, 30000, 45000] + args.test_iterations
+    # args.test_iterations          = [1] + [3000, 5000, 10000, 15000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000, 100000] + args.test_iterations
     # args.test_iterations          = [1] + list(range(0, 10001, op.densification_interval//2)) + [10000, 12000, 15000, 20000, 30000, 70000, 80000, 100000] + args.test_iterations
     # args.test_iterations          = [1, 1000, 5000, 10000, 20000, 30000] + args.test_iterations
     args.save_iterations          = [1] + args.save_iterations
-    args.render_meshes_iterations = [1] + [3000, 5000, 10000, 15000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 100000]  + args.render_meshes_iterations
+    args.render_meshes_iterations = [1] + [5000, 10000, 20000, 30000, 45000] + args.render_meshes_iterations
     # args.render_meshes_iterations = [1] + list(range(0, 10001, op.densification_interval//2)) + [10000, 12000, 15000, 20000, 30000, 70000, 80000, 100000]  + args.render_meshes_iterations
     # args.render_meshes_iterations = [1, 500, 1000, 2000, 5000, 10000, 15000, 20000, 25000 , 30000] + args.render_meshes_iterations
 

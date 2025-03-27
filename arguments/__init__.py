@@ -113,8 +113,9 @@ class OptimizationParams(ParamGroup):
         self.lambda_laplacian = 0.
         self.lambda_dynamic_offset_std = 0  #1.
 
-        self.offset_lr = 1e-6
-        self.lambda_offset_norm = 0.
+        # self.offset_lr = 1e-6
+        self.lambda_offset_norm = 0. # deprecated
+        self.lambda_static_offset = 0.
         self.lambda_static_offset_laplacian = 0.
         self.trans_lr = 1e-6 
         self.rot_lr = 1e-5 
@@ -125,6 +126,11 @@ class OptimizationParams(ParamGroup):
         self.fixate_xyz_during_repos = False
         self.dont_learn_bs_during_repos = False
         self.lambda_bs_weights_norm = 0.
+        self.bs_lr_init = 0.0025
+        self.bs_lr_final = 0.000025
+        self.static_offset_lr = 0. # 1e-6
+        self.dynamic_offset_lr = 0. # 1e-6
+        self.lambda_offset_laplace_l2 = 0.
  
         super().__init__(parser, "Optimization Parameters")
 

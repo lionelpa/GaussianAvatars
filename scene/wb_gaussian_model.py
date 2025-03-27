@@ -130,7 +130,8 @@ class WBGaussianModel(GaussianModel):
         rot_lr = training_args.rot_lr
         scale_lr = training_args.scale_lr
         bs_lr = training_args.bs_lr
-        offset_lr = training_args.offset_lr
+        static_offset_lr = training_args.static_offset_lr
+        dynamic_offset_lr = training_args.dynamic_offset_lr
 
         # translation
         self.model_params['mesh_translation'].requires_grad = True
@@ -154,15 +155,15 @@ class WBGaussianModel(GaussianModel):
         param_bs_weights = {'params': [self.model_params['add_bs_weights']], 'lr': bs_lr, "name": "add_bs_weights"}
         self.optimizer.add_param_group(param_bs_weights)
 
-        # # static_offset
-        # self.model_params['static_offset'].requires_grad = True
-        # param_static_offset = {'params': [self.model_params['static_offset']], 'lr': offset_lr, "name": "static_offset"}
-        # self.optimizer.add_param_group(param_static_offset)
+        # static_offset
+        self.model_params['static_offset'].requires_grad = True
+        param_static_offset = {'params': [self.model_params['static_offset']], 'lr': static_offset_lr, "name": "static_offset"}
+        self.optimizer.add_param_group(param_static_offset)
 
-        # # dynamic_offset
-        # self.model_params['dynamic_offset'].requires_grad = True
-        # param_dynamic_offset = {'params': [self.model_params['dynamic_offset']], 'lr': 1e-6, "name": "dynamic_offset"}
-        # self.optimizer.add_param_group(param_dynamic_offset)
+        # dynamic_offset
+        self.model_params['dynamic_offset'].requires_grad = True
+        param_dynamic_offset = {'params': [self.model_params['dynamic_offset']], 'lr': dynamic_offset_lr, "name": "dynamic_offset"}
+        self.optimizer.add_param_group(param_dynamic_offset)
 
         self.trans_scheduler_args = get_expon_lr_func(lr_init=trans_lr,
                                                     lr_final= training_args.flame_trans_lr,
@@ -173,6 +174,9 @@ class WBGaussianModel(GaussianModel):
         self.scale_scheduler_args = get_expon_lr_func(lr_init=scale_lr,
                                                     lr_final= training_args.flame_pose_lr,
                                                     max_steps=training_args.reposition_until)
+        self.bs_scheduler_args = get_expon_lr_func(lr_init=training_args.bs_lr_init,
+                                                    lr_final= training_args.bs_lr_final,
+                                                    max_steps=training_args.iterations)
                                                     
 
     def update_learning_rate(self, iteration):
@@ -213,27 +217,15 @@ class WBGaussianModel(GaussianModel):
         self.min_timestep = int(params['min_timestep'])
         self.max_timestep = int(params['max_timestep'])
 
-
-    def compute_offset_laplacian_mse_loss(self):
-        v = self.verts.squeeze() 
-        v_cano = self.verts_cano.squeeze()
-        f = self.faces
-
-        mesh = Meshes(verts=[v], faces=[f])
-        mesh_cano = Meshes(verts=[v_cano], faces=[f])
-
-        lap = mesh_laplacian_smoothing_per_vertex(mesh, "cot") # nverts x 3
-        lap_cano = mesh_laplacian_smoothing_per_vertex(mesh_cano, "cot") # nverts x 3
-
-        lap = lap.norm(dim=-1)
-        lap_cano = lap_cano.norm(dim=-1)
-
-        lap_sq_err = (lap - lap_cano) ** 2
-        lap_mse = torch.mean(lap_sq_err) 
-
-        return lap_mse
     
-    def compute_offset_loss(self):
+    def compute_offset_laplace_loss_L2(self):
+        total_offset = self.model_params["static_offset"] +  self.get_dynamic_offset()
+        mesh = Meshes(verts=[total_offset], faces=[self.faces])
+        lap = mesh_laplacian_smoothing_per_vertex(mesh, "cot") # nverts x 3
+        loss = torch.sum(torch.sum(lap ** 2, dim=1))
+        return loss
+
+    def compute_offset_loss_L1(self):
         total_offset = self.model_params["static_offset"] +  self.get_dynamic_offset()
         return total_offset.norm(dim=-1).sum()
 
@@ -341,5 +333,4 @@ class WBGaussianModel(GaussianModel):
                 print(f"[DEACTIVATE] Successfully set lr for add_bs_weights to zero!")
                 return
         raise Exception("Could not deactivate add_bs_weights lr!")
-
 
