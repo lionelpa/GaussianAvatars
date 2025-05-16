@@ -211,12 +211,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 losses["offset_norm"] = gaussians.compute_offset_loss_L1() * opt.lambda_offset_norm
                 raise Exception("Possibly deprecated. Sure you want to use this?")
             if opt.lambda_static_offset != 0:
-                losses["static_offset"] = gaussians.model_params["static_offset"].norm(p=2) * opt.lambda_static_offset 
+                losses["static_offset"] = gaussians.model_params["static_offset"].pow(2).sum() * opt.lambda_static_offset 
             if opt.lambda_bs_weights_norm != 0:
-                losses["add_bs_norm"] = gaussians.model_params['add_bs_weights'].norm(p=2) * opt.lambda_bs_weights_norm
+                losses["add_bs_norm"] = gaussians.model_params['add_bs_weights'].pow(2).sum() * opt.lambda_bs_weights_norm
                 # losses["add_bs_norm"] = gaussians.model_params['add_bs_weights'].norm(dim=-1).sum() * opt.lambda_bs_weights_norm
             if opt.lambda_dynamic_offset != 0:   # Lionel: cant use nießner cause our dyn works differently (does not depend on timestep)
-                losses['dynamic_offset'] = gaussians.model_params['dynamic_offset'].norm(p=2) * opt.lambda_dynamic_offset
+                losses['dynamic_offset'] = gaussians.model_params['dynamic_offset'].pow(2).sum() * opt.lambda_dynamic_offset
             if opt.lambda_offset_laplace_l2 != 0:   # Lionel: cant use nießner cause our dyn works differently (does not depend on timestep)
                 losses['offset_laplace_l2'] = gaussians.compute_offset_laplace_loss_L2() * opt.lambda_offset_laplace_l2
         
@@ -552,12 +552,12 @@ if __name__ == "__main__":
     if len(args.render_meshes_iterations) == 0:
         args.render_meshes_iterations.extend(list(range(args.interval, args.iterations+1, args.interval)))
     
-    args.test_iterations          = [1] + [5000, 10000, 20000, 30000, 45000] + args.test_iterations
+    args.test_iterations          = [5000, 10000, 30000, 60000, 100000, 200000] + args.test_iterations
     # args.test_iterations          = [1] + [3000, 5000, 10000, 15000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000, 100000] + args.test_iterations
     # args.test_iterations          = [1] + list(range(0, 10001, op.densification_interval//2)) + [10000, 12000, 15000, 20000, 30000, 70000, 80000, 100000] + args.test_iterations
     # args.test_iterations          = [1, 1000, 5000, 10000, 20000, 30000] + args.test_iterations
-    args.save_iterations          = [1] + args.save_iterations
-    args.render_meshes_iterations = [1] + [5000, 10000, 20000, 30000, 45000] + args.render_meshes_iterations
+    args.save_iterations          = [30000, 60000, 100000, 200000] + args.save_iterations
+    args.render_meshes_iterations = [10000, 30000, 60000, 100000, 200000] + args.render_meshes_iterations
     # args.render_meshes_iterations = [1] + list(range(0, 10001, op.densification_interval//2)) + [10000, 12000, 15000, 20000, 30000, 70000, 80000, 100000]  + args.render_meshes_iterations
     # args.render_meshes_iterations = [1, 500, 1000, 2000, 5000, 10000, 15000, 20000, 25000 , 30000] + args.render_meshes_iterations
 
