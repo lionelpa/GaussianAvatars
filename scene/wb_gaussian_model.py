@@ -217,17 +217,11 @@ class WBGaussianModel(GaussianModel):
         self.min_timestep = int(params['min_timestep'])
         self.max_timestep = int(params['max_timestep'])
 
-    
-    def compute_offset_laplace_loss_L2(self):
-        total_offset = self.model_params["static_offset"] +  self.get_dynamic_offset()
+    def compute_static_offset_laplace(self):
+        total_offset = self.model_params["static_offset"]
         mesh = Meshes(verts=[total_offset], faces=[self.faces])
         lap = mesh_laplacian_smoothing_per_vertex(mesh, "cot") # nverts x 3
-        loss = torch.sum(torch.sum(lap ** 2, dim=1))
-        return loss
-
-    def compute_offset_loss_L1(self):
-        total_offset = self.model_params["static_offset"] +  self.get_dynamic_offset()
-        return total_offset.norm(dim=-1).sum()
+        return torch.sum((lap ** 2).sum(dim=1))
 
     def get_dynamic_offset(self):
         x = self.model_params["dynamic_offset"]

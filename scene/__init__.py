@@ -92,10 +92,12 @@ class Scene:
         # load dataset
         assert os.path.exists(args.source_path), "Source path does not exist: {}".format(args.source_path)
         if os.path.exists(args.source_path):
+            test_frames = set([80, 162, 200, 216, 247, 296, 404])
+            train_frames = set(range(25,461)) - set(f for t in test_frames for f in range(t - 2, t + 3)) 
             scene_info = sceneLoadTypeCallbacks["ScannerWB"](args.source_path, args.images,
                                                              gaussians.raw_mesh_centroid.cpu().numpy(),
                                                              float(gaussians.rescale_factor),
-                                                             {8}, set(range(25,350)), set(range(351, 460, 10)), args.eval)
+                                                             {}, train_frames, test_frames, args.eval)
         # elif os.path.exists(os.path.join(args.source_path, "sparse")):
         #     scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval)
         # elif os.path.exists(os.path.join(args.source_path, "canonical_flame_param.npz")):

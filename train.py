@@ -3,7 +3,7 @@
 # GRAPHDECO research group, https://team.inria.fr/graphdeco
 # All rights reserved.
 #
-# This software is free for non-commercial, research and evaluation use 
+# This software is free for non-commercial, research and evaluation use
 # under the terms of the LICENSE.md file.
 #
 # For inquiries contact  george.drettakis@inria.fr
@@ -205,21 +205,16 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 losses['lap'] = gaussians.compute_laplacian_loss() * opt.lambda_laplacian
 
             # custom
-            if opt.lambda_static_offset_laplacian != 0:
-                losses["offset_lap"] = gaussians.compute_offset_laplacian_mse_loss() * opt.lambda_static_offset_laplacian
-            if opt.lambda_offset_norm != 0:
-                losses["offset_norm"] = gaussians.compute_offset_loss_L1() * opt.lambda_offset_norm
-                raise Exception("Possibly deprecated. Sure you want to use this?")
-            if opt.lambda_static_offset != 0:
-                losses["static_offset"] = gaussians.model_params["static_offset"].pow(2).sum() * opt.lambda_static_offset 
             if opt.lambda_bs_weights_norm != 0:
                 losses["add_bs_norm"] = gaussians.model_params['add_bs_weights'].pow(2).sum() * opt.lambda_bs_weights_norm
-                # losses["add_bs_norm"] = gaussians.model_params['add_bs_weights'].norm(dim=-1).sum() * opt.lambda_bs_weights_norm
+            ## offsets
+            if opt.lambda_static_offset != 0:
+                losses["static_offset"] = gaussians.model_params["static_offset"].pow(2).sum() * opt.lambda_static_offset
+            if opt.lambda_static_offset_laplace > 0:
+                losses['static_offset_laplace'] = gaussians.compute_static_offset_laplace() * opt.lambda_static_offset_laplace
             if opt.lambda_dynamic_offset != 0:   # Lionel: cant use nießner cause our dyn works differently (does not depend on timestep)
                 losses['dynamic_offset'] = gaussians.model_params['dynamic_offset'].pow(2).sum() * opt.lambda_dynamic_offset
-            if opt.lambda_offset_laplace_l2 != 0:   # Lionel: cant use nießner cause our dyn works differently (does not depend on timestep)
-                losses['offset_laplace_l2'] = gaussians.compute_offset_laplace_loss_L2() * opt.lambda_offset_laplace_l2
-        
+
         losses['total'] = sum([v for k, v in losses.items()])
         losses['total'].backward()
 
@@ -314,15 +309,18 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
         if 'offset_norm' in losses:
             tb_writer.add_scalar('1_train_loss_patches/offset_norm', losses['offset_norm'].item(), iteration)
         if 'add_bs_norm' in losses:
-            tb_writer.add_scalar('1_train_loss_patches/add_bs_norm', losses['add_bs_norm'].item(), iteration)    
+            tb_writer.add_scalar('1_train_loss_patches/add_bs_norm', losses['add_bs_norm'].item(), iteration)
         if 'add_bs_norm' in losses and 'xyz' in losses:
-            tb_writer.add_scalar('1_train_loss_patches/1_diff_xyz-bs', losses['xyz'].item() - losses['add_bs_norm'].item(), iteration)   
-        if 'static_offset' in losses: 
-            tb_writer.add_scalar('1_train_loss_patches/static_offset_norm_mean', losses['static_offset'].item(), iteration) 
-        if 'dynamic_offset' in losses: 
-            tb_writer.add_scalar('1_train_loss_patches/dynamic_offset_norm_mean', losses['dynamic_offset'].item(), iteration)  
-        if 'offset_laplace_l2' in losses: 
-            tb_writer.add_scalar('1_train_loss_patches/offset_laplace_l2', losses['offset_laplace_l2'].item(), iteration)   
+            tb_writer.add_scalar('1_train_loss_patches/1_diff_xyz-bs', losses['xyz'].item() - losses['add_bs_norm'].item(), iteration)
+        # offsets
+        if 'static_offset' in losses:
+            tb_writer.add_scalar('1_train_loss_patches/static_offset_norm_mean', losses['static_offset'].item(), iteration)
+        if 'static_offset_laplace' in losses:
+            tb_writer.add_scalar('1_train_loss_patches/static_offset_laplace', losses['static_offset_laplace'].item(), iteration)
+        if 'dynamic_offset' in losses:
+            tb_writer.add_scalar('1_train_loss_patches/dynamic_offset_norm_mean', losses['dynamic_offset'].item(), iteration)
+        
+
 
         tb_writer.add_scalar('1_train_loss_patches/total_loss', losses['total'].item(), iteration)
         tb_writer.add_scalar('1_train_loss_patches/total_dssim+l1', losses['ssim'].item() + losses['l1'].item(), iteration)
@@ -390,6 +388,9 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
                 gt_image_cache = []
                 vis_ct = 0
                 for idx, viewpoint in tqdm(enumerate(DataLoader(config['cameras'], shuffle=False, batch_size=None, num_workers=8)), total=len(config['cameras'])):
+                    # get cam id and frame
+                    cam_id = viewpoint.colmap_id
+                    frame = viewpoint.timestep
                     if scene.gaussians.num_timesteps > 1:
                         scene.gaussians.select_mesh_by_timestep(viewpoint.timestep)
                     image = torch.clamp(renderFunc(viewpoint, scene.gaussians, *renderArgs)["render"], 0.0, 1.0)
@@ -416,9 +417,9 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
                         gt_image_cache = []
 
                 psnr_test /= len(config['cameras'])
-                l1_test /= len(config['cameras'])          
-                lpips_test /= len(config['cameras'])          
-                ssim_test /= len(config['cameras'])          
+                l1_test /= len(config['cameras'])
+                lpips_test /= len(config['cameras'])
+                ssim_test /= len(config['cameras'])
                 print("[ITER {}] Evaluating {}: L1 {:.4f} PSNR {:.4f} SSIM {:.4f} LPIPS {:.4f}".format(iteration, config['name'], l1_test, psnr_test, ssim_test, lpips_test))
                 if tb_writer:
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - l1_loss', l1_test, iteration)
@@ -551,15 +552,11 @@ if __name__ == "__main__":
     # custom
     if len(args.render_meshes_iterations) == 0:
         args.render_meshes_iterations.extend(list(range(args.interval, args.iterations+1, args.interval)))
-    
-    args.test_iterations          = [5000, 10000, 30000, 60000, 100000, 200000] + args.test_iterations
-    # args.test_iterations          = [1] + [3000, 5000, 10000, 15000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000, 100000] + args.test_iterations
-    # args.test_iterations          = [1] + list(range(0, 10001, op.densification_interval//2)) + [10000, 12000, 15000, 20000, 30000, 70000, 80000, 100000] + args.test_iterations
-    # args.test_iterations          = [1, 1000, 5000, 10000, 20000, 30000] + args.test_iterations
-    args.save_iterations          = [30000, 60000, 100000, 200000] + args.save_iterations
-    args.render_meshes_iterations = [10000, 30000, 60000, 100000, 200000] + args.render_meshes_iterations
-    # args.render_meshes_iterations = [1] + list(range(0, 10001, op.densification_interval//2)) + [10000, 12000, 15000, 20000, 30000, 70000, 80000, 100000]  + args.render_meshes_iterations
-    # args.render_meshes_iterations = [1, 500, 1000, 2000, 5000, 10000, 15000, 20000, 25000 , 30000] + args.render_meshes_iterations
+
+    args.test_iterations          = [1, 2000, 5000, 10000, 30000, 60000, 120000, 200000] + args.test_iterations
+    args.save_iterations          = [] + args.save_iterations
+    args.render_meshes_iterations = [1, 10000, 15000, 20000, 30000, 60000, 100000, 200000] + args.render_meshes_iterations
+
 
     print("Optimizing " + args.model_path)
 
@@ -573,13 +570,13 @@ if __name__ == "__main__":
     network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
     training(
-        lp.extract(args), 
-        op.extract(args), 
-        pp.extract(args), 
-        args.test_iterations, 
-        args.save_iterations, 
-        args.checkpoint_iterations, 
-        args.start_checkpoint, 
+        lp.extract(args),
+        op.extract(args),
+        pp.extract(args),
+        args.test_iterations,
+        args.save_iterations,
+        args.checkpoint_iterations,
+        args.start_checkpoint,
         args.debug_from,
         args.render_meshes_iterations)
 
