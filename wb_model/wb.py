@@ -132,6 +132,15 @@ class WBModel(nn.Module):
         head_neutral_centered_v = (self.head_neutral_v - neutral_head_mean).unsqueeze(0)
         eyes_neutral_centered_v = (self.eyes_neutral_v - neutral_head_mean).unsqueeze(0)
 
+        #apply static offset beofre bs
+        # print("head neutral shape", head_neutral_centered_v.shape)
+        # print("eyes neutral shape", eyes_neutral_centered_v.shape)
+        # print("staticoffset shape", static_offset.shape)
+        # print("static_offset[:head_neutral_centered_v.shape[1]]", static_offset[:,:head_neutral_centered_v.shape[1]].shape)
+        # print("static_offset[head_neutral_centered_v.shape[1]:]", static_offset[:,head_neutral_centered_v.shape[1]:].shape)
+        head_neutral_centered_v = head_neutral_centered_v + static_offset[:,:head_neutral_centered_v.shape[1]]
+        eyes_neutral_centered_v = eyes_neutral_centered_v + static_offset[:,head_neutral_centered_v.shape[1]:]
+
         # apply blendshapes
         w_0 = w_0.reshape(*(w_0.shape), 1, 1)
         weighted_bs = (w_0 * bs).sum(1) + head_neutral_centered_v
@@ -140,7 +149,7 @@ class WBModel(nn.Module):
         verts_full_cano = torch.cat([weighted_bs, eyes_neutral_centered_v], dim=1)
 
         # apply static offset
-        verts_full_with_offset = verts_full_cano + static_offset
+        verts_full_with_offset = verts_full_cano
 
         # apply dynamic offset based on bs
         # dyn_offset = 1 x B x V x 3

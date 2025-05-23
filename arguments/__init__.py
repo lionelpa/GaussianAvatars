@@ -117,17 +117,18 @@ class OptimizationParams(ParamGroup):
         self.rot_lr = 1e-5 
         self.scale_lr = 0.
         self.bs_lr = 1e-3 
-        self.reposition_until = -1
+        self.reposition_until = -1 #10000
         self.reset_interval = -1
-        self.fixate_xyz_during_repos = False
+        self.fixate_xyz_during_repos = True
         self.dont_learn_bs_during_repos = False
-        self.lambda_bs_weights_norm = 0.
-        self.bs_lr_init = 1e-3 # 0.0025 # commented on 15.5.25
-        self.bs_lr_final =  1e-3 # 0.000025 # 0.0025 # commented on 15.5.25
+        # self.bs_lr_init = 1.01e-3 # 0.0025 # commented on 15.5.25
+        # self.bs_lr_final =  1e-3 # 0.000025 # commented on 15.5.25
         self.static_offset_lr = 0. # 1e-6
         self.dynamic_offset_lr = 0. # 1e-6
         self.lambda_offset_laplace_l2 = 0.
-        self.lambda_static_offset_laplace = 0.01
+        self.lambda_static_offset = 0. #0.01
+        self.lambda_static_offset_laplace = 0. #0.01
+        self.lambda_bs_weights_norm = 0.
 
         super().__init__(parser, "Optimization Parameters")
 

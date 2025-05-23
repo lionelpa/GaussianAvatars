@@ -92,7 +92,7 @@ class Scene:
         # load dataset
         assert os.path.exists(args.source_path), "Source path does not exist: {}".format(args.source_path)
         if os.path.exists(args.source_path):
-            test_frames = set([80, 162, 200, 216, 247, 296, 404])
+            test_frames = set([25, 80, 162, 216, 247, 339, 441]) # when changed also change in train.py!!!
             train_frames = set(range(25,461)) - set(f for t in test_frames for f in range(t - 2, t + 3)) 
             scene_info = sceneLoadTypeCallbacks["ScannerWB"](args.source_path, args.images,
                                                              gaussians.raw_mesh_centroid.cpu().numpy(),

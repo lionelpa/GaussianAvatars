@@ -192,14 +192,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     # losses['scale'] = F.relu(gaussians._scaling).norm(dim=1).mean() * opt.lambda_scale
                     losses['scale'] = F.relu(torch.exp(gaussians._scaling[visibility_filter]) - opt.threshold_scale).norm(dim=1).mean() * opt.lambda_scale
 
-            if opt.lambda_dynamic_offset_std != 0:
-                ti = viewpoint_cam.timestep
-                t_indices =[ti]
-                if ti > 0:
-                    t_indices.append(ti-1)
-                if ti < gaussians.num_timesteps - 1:
-                    t_indices.append(ti+1)
-                losses['dynamic_offset_std'] = gaussians.flame_param['dynamic_offset'].std(dim=0).mean() * opt.lambda_dynamic_offset_std
+            # if opt.lambda_dynamic_offset_std != 0:
+            #     ti = viewpoint_cam.timestep
+            #     t_indices =[ti]
+            #     if ti > 0:
+            #         t_indices.append(ti-1)
+            #     if ti < gaussians.num_timesteps - 1:
+            #         t_indices.append(ti+1)
+            #     losses['dynamic_offset_std'] = gaussians.flame_param['dynamic_offset'].std(dim=0).mean() * opt.lambda_dynamic_offset_std
         
             if opt.lambda_laplacian != 0:
                 losses['lap'] = gaussians.compute_laplacian_loss() * opt.lambda_laplacian
@@ -377,6 +377,18 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
             {'name': 'test', 'cameras' : scene.getTestCameras()},
         )
 
+        # test_render_frames = [25, 80, 162, 216, 247, 339, 441]
+        # test_render_cams = [13,9,12]
+        # frame -> cams
+        test_render_dict= {
+            25:  [13],
+            80:  [13],
+            162: [5],
+            216: [6],
+            247: [11],
+            339: [12],
+            441: [9],
+        }
         for config in validation_configs:
             if config['cameras'] and len(config['cameras']) > 0:
                 l1_test = 0.0
@@ -395,12 +407,12 @@ def training_report(tb_writer, iteration, losses, elapsed, testing_iterations, s
                         scene.gaussians.select_mesh_by_timestep(viewpoint.timestep)
                     image = torch.clamp(renderFunc(viewpoint, scene.gaussians, *renderArgs)["render"], 0.0, 1.0)
                     gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
-                    if tb_writer and (idx % (len(config['cameras']) // num_vis_img) == 0):
-                        tb_writer.add_images(config['name'] + "_{}/render".format(vis_ct), image[None], global_step=iteration)
+                    if tb_writer and config['name']=='test' and frame in test_render_dict and cam_id in test_render_dict[frame]:
+                        tb_writer.add_images(config['name'] + f"_f{frame}/render_c{cam_id}", image[None], global_step=iteration)
                         error_image = error_map(image, gt_image)
-                        tb_writer.add_images(config['name'] + "_{}/error".format(vis_ct), error_image[None], global_step=iteration)
+                        tb_writer.add_images(config['name'] + f"_f{frame}/error_c{cam_id}", error_image[None], global_step=iteration)
                         if iteration == testing_iterations[0]:
-                            tb_writer.add_images(config['name'] + "_{}/ground_truth".format(vis_ct), gt_image[None], global_step=iteration)
+                            tb_writer.add_images(config['name'] + f"_f{frame}/gt_c{cam_id}", gt_image[None], global_step=iteration)
                         vis_ct += 1
                     l1_test += l1_loss(image, gt_image).mean().double()
                     psnr_test += psnr(image, gt_image).mean().double()
@@ -553,9 +565,13 @@ if __name__ == "__main__":
     if len(args.render_meshes_iterations) == 0:
         args.render_meshes_iterations.extend(list(range(args.interval, args.iterations+1, args.interval)))
 
-    args.test_iterations          = [1, 2000, 5000, 10000, 30000, 60000, 120000, 200000] + args.test_iterations
-    args.save_iterations          = [] + args.save_iterations
-    args.render_meshes_iterations = [1, 10000, 15000, 20000, 30000, 60000, 100000, 200000] + args.render_meshes_iterations
+    # args.test_iterations          = [50000, 100000, 150000, 200000, 300000, 400000, 500000, 600000]# + args.test_iterations
+    args.test_iterations          = [50000, 100000, 150000, 200000, 300000, 400000, 500000, 600000]# + args.test_iterations
+    # used to track psnr 
+    args.test_render_iterations   = [50000, 100000, 150000, 200000, 300000, 400000, 500000, 600000]# + args.test_iterations
+    args.save_iterations          = [50000, 100000, 150000 ,200000, 300000, 400000, 500000, 600000] #+ args.save_iterations
+    args.checkpoint_iterations    = [50000, 100000, 150000 ,200000, 300000, 400000, 500000, 600000]
+    args.render_meshes_iterations = [1, 5000, 10000, 15000, 30000, 60000, 120000, 179999] #+ args.render_meshes_iterations
 
 
     print("Optimizing " + args.model_path)

@@ -174,9 +174,10 @@ class WBGaussianModel(GaussianModel):
         self.scale_scheduler_args = get_expon_lr_func(lr_init=scale_lr,
                                                     lr_final= training_args.flame_pose_lr,
                                                     max_steps=training_args.reposition_until)
-        self.bs_scheduler_args = get_expon_lr_func(lr_init=training_args.bs_lr_init,
-                                                    lr_final= training_args.bs_lr_final,
-                                                    max_steps=training_args.iterations)
+        self.bs_scheduler_args = get_expon_lr_func(lr_init=training_args.bs_lr,
+                                                    lr_final= training_args.bs_lr,
+                                                    max_steps=training_args.reposition_until,
+                                                    lr_delay_steps=5000, lr_delay_mult=0)
                                                     
 
     def update_learning_rate(self, iteration):
@@ -192,6 +193,9 @@ class WBGaussianModel(GaussianModel):
                 param_group['lr'] = lr
             elif param_group["name"] == "global_mesh_scale":
                 lr = self.scale_scheduler_args(iteration)
+                param_group['lr'] = lr
+            elif param_group["name"] == "add_bs_weights":
+                lr = self.bs_scheduler_args(iteration)
                 param_group['lr'] = lr
 
     def save_ply(self, path):
