@@ -9,10 +9,10 @@ from PIL import Image
 from utils.pytorch3d import euler_angles_to_matrix
 from utils.pytorch3d_load_obj import load_obj
 
-ROOT = "/home/lionel.azevedo/data/wb_scanner" # "/home/lio/PycharmProjects/data/scanner_wb/video"
+ROOT = "/home/lio/PycharmProjects/data/scanner_wb/video"
 WB_HEAD_BASE_MESH_PATH     = ROOT + "/smooth2/0_head_nicolas_neutral.obj"
 WB_EYES_BASE_MESH_PATH     = ROOT + "/smooth2/0_eyes_nicolas_neutral.obj"
-WB_BLENDSHAPES_PATH        = ROOT + "/bs" #"wb_model/assets/bs"
+WB_BLENDSHAPES_PATH        = ROOT + "/bs"
 WB_TEXTURE_PATH = "wb_model/assets/skin_basecolor.png"
 
 # needed for adjustment of pos and scale to those of FLAME
@@ -160,6 +160,27 @@ class WBModel(nn.Module):
         # save_obj(f"./output/A_{timestep}_maxim.obj", verts=rotated_pred[0], faces=self.faces)
 
         return rotated_pred, None #rotated_pred_cano
+
+    def a(self, translation, rotation, scale, global_scale, blendshape_weights, timestep, mean, static_offset, dynamic_offset):
+
+        bs = self.shapes.unsqueeze(0)
+        dynamic_offset = dynamic_offset.unsqueeze(0)
+
+        base_shape = dict()
+        distorted_shape = dict()
+
+        num_bs = self.shapes.shape[0]
+        print("num_bs", num_bs)
+        for i in range(num_bs):
+            bs_name = self.shapes_names[i]
+            bs_base = self.head_neutral_v + bs[0, i]
+            bs_offset = dynamic_offset[0,i]
+
+            base_shape[bs_name] = bs_base
+            distorted_shape[bs_name] = bs_base + bs_offset[:6688]
+
+        return base_shape, distorted_shape
+
 
 
 if __name__ == '__main__':

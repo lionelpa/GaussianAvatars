@@ -246,8 +246,8 @@ def readWBCamerasFromXML(source_path, images_folder_name, cameras_xml_file_name,
 
     print(f"===== Finished loading cameras from {camsXML_path}")
     print(f"#Train: {len(train_cam_infos)} total = {len(train_cam_infos)//len(train_frames)} cams x {len(train_frames)} frames")
-    print(f"#Val  : {len(val_cam_infos)} total = {len(val_cam_ids)} cams x {len(train_frames)} frames")
-    print(f"#Test : {len(test_cam_infos)} total = {len(test_cam_infos)//len(test_frames)} cams x {len(test_frames)} frames")
+    # print(f"#Val  : {len(val_cam_infos)} total = {len(val_cam_ids)} cams x {len(train_frames)} frames")
+    # print(f"#Test : {len(test_cam_infos)} total = {len(test_cam_infos)//len(test_frames)} cams x {len(test_frames)} frames")
     print(f"[WARNING]: Discarded the following frames:\n{sorted(list(discarded_frames))}")
 
     if not eval:

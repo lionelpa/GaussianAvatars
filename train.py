@@ -27,7 +27,7 @@ from mesh_renderer import NVDiffRenderer
 from scene import Scene
 from scene.wb_gaussian_model import WBGaussianModel
 from utils.general_utils import safe_state
-from utils.image_utils import psnr, error_map
+from utils.image_utils import psnr, error_map, save_tensor_as_image, save_tensor_as_image2
 from utils.loss_utils import l1_loss, ssim
 
 try:
@@ -66,11 +66,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     loader_camera_train = DataLoader(scene.getTrainCameras(), batch_size=None, shuffle=True, num_workers=8, pin_memory=True, persistent_workers=True)
     iter_camera_train = iter(loader_camera_train)
 
-    # chosen_cams = set()
-    # training_start_time = datetime.now()
-    # for cam in tqdm(iter_camera_train, desc="Render images for cams", unit=" cams"):
-    #     if cam.colmap_id not in chosen_cams and cam.timestep == 4:
-    #         chosen_cams.add(cam.colmap_id)
+    # # ========== RENDER MESHES BASE
+    # for cam in tqdm(scene.getTrainCameras(), desc="Render images for cams", unit=" cams"):
+    #         cam_id = cam.colmap_id
+    #         frame = cam.timestep
+    #         if cam_id==9 and frame==441:
+    #             print("JAAAAAAAAAAAAA "*100)
     #         gaussians.select_mesh_by_timestep(cam.timestep)
     #
     #         # export mesh render
@@ -78,14 +79,47 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     #         rgba_mesh = out_dict['rgba'].squeeze(0)  # (H, W, C)
     #         rgb_mesh = rgba_mesh[:, :, :3]
     #         image=rgb_mesh.permute(2,0,1)
-    #         save_tensor_as_image(image, cam, -1, training_start_time)
-    #
-    #         ## export gaussian render
-    #         render_pkg = render(cam, gaussians, pipe, background)
-    #         image = render_pkg["render"]
-    #         save_tensor_as_image(image, cam, -2, training_start_time)
+    #         save_tensor_as_image2(image, cam_id, frame)
     # raise Exception("Finished generating test images")
 
+    # ========== RENDER MESHES STATIC + DYNAMIC
+    trained_gaussians = WBGaussianModel(True, 3)
+    print("Gaussians init...")
+    trained_gaussians.load_ply(
+        # "/home/lio/PycharmProjects/output/e/clean_wb_thesis_2025-05-20_23-58-24_dynamic_l2lambda1_1/point_cloud/iteration_179999/point_cloud.ply",
+        "/home/lio/PycharmProjects/output/e/clean_wb_thesis_2025-05-20_00-02-35_static_lambdalaplace100_1/point_cloud/iteration_179999/point_cloud.ply",
+        has_target=False,
+        motion_path=None,
+        disable_fid=[])
+    print("Gaussians loaded")
+
+    for cam in tqdm(scene.getTrainCameras(), desc="Render images for cams", unit=" cams"):
+        cam_id = cam.colmap_id
+        frame = cam.timestep
+        if cam_id == 13 and frame == 100:
+        # if cam_id == 9 and frame == 441:
+            print("JAAAAAAAAAAAAA")
+            trained_gaussians.select_mesh_by_timestep(frame)
+            # export mesh render
+            out_dict = mesh_renderer.render_from_camera(trained_gaussians.verts, trained_gaussians.faces, cam)
+            rgba_mesh = out_dict['rgba'].squeeze(0)  # (H, W, C)
+            rgb_mesh = rgba_mesh[:, :, :3]
+            alpha_mesh = rgba_mesh[:, :, 3:]
+            image = rgb_mesh.permute(2, 0, 1)
+            mesh_opacity = torch.tensor(0.5)
+
+            # # ======== comment in for overlay =====
+            # gt_image = cam.original_image  # Assuming this is a PIL image or convertible
+            # gt_image = gt_image.permute(1, 2, 0).cuda()
+            # # alpha blend
+            # final = rgb_mesh * alpha_mesh * mesh_opacity + gt_image * (
+            #             alpha_mesh * (1 - mesh_opacity) + (1 - alpha_mesh))
+            # image = final.permute(2, 0, 1)
+            # # =====================================
+
+            save_tensor_as_image2(image, cam_id, frame, name_append="static")
+            raise Exception("YAY")
+    raise Exception("NOT FOUND")
     # viewpoint_stack = None
     ema_loss_for_log = 0.0
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
@@ -585,3 +619,4 @@ if __name__ == "__main__":
 
     # All done
     print("\nTraining complete.")
+

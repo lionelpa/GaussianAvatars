@@ -60,3 +60,34 @@ def save_tensor_as_image(tensor, cam, iteration, training_start_time, output_dir
     image_name = f"it{str(iteration).zfill(6)}_cam{str(cam.colmap_id).zfill(3)}_ts{str(cam.timestep).zfill(4)}_name{cam.image_name.split('.')[0]}.png"
     output_file_path = os.path.join(out_dir, image_name)
     image.save(output_file_path)
+
+def save_tensor_as_image2(tensor, cam_id, timestep, name_append=""):
+    """
+    Convert a 3xHxW image tensor to a PIL image and save it to the specified path. Creates the directory if it doesn't exist.
+
+    Args:
+    - tensor (torch.Tensor): The input tensor with shape (3, H, W).
+    - output_path (str): The path where the image should be saved.
+    """
+    # Ensure the tensor is on the CPU
+    tensor = tensor.cpu()
+    out_dir = f"output/mesh_renders/{cam_id}"
+
+    # Permute the tensor to (H, W, C) format and convert to a numpy array
+    image_np = tensor.permute(1, 2, 0).detach().numpy()
+
+    # Scale the values to [0, 255] and convert to uint8
+    image_np = (image_np * 255).astype(np.uint8)
+
+    # Convert the numpy array to a PIL image
+    image = Image.fromarray(image_np)
+
+    # Create a directory with the current date and time if it doesn't exist
+    # Get the parent directory of the script's location
+    os.makedirs(out_dir, exist_ok=True)
+
+    # Save the image to the specified output path in the new directory
+    image_name = f"{timestep}{name_append}.png"
+    output_file_path = os.path.join(out_dir, image_name)
+    image.save(output_file_path)
+    print(f"Wrote {output_file_path}")
