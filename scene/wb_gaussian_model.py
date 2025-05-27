@@ -282,17 +282,6 @@ class WBGaussianModel(GaussianModel):
         optimizable_tensors = self.replace_tensor_to_optimizer(self._opacity_original, "opacity")
         self._opacity = optimizable_tensors["opacity"]
 
-        # reset bs_weights
-        optimizable_tensors = self.replace_tensor_to_optimizer(self._add_bs_weights_original.clone(), "add_bs_weights")
-        self.model_params["add_bs_weights"] = optimizable_tensors["add_bs_weights"]
-
-        # # reset static offsets
-        # optimizable_tensors = self.replace_tensor_to_optimizer(self._static_offset_original.clone(), "static_offset")
-        # self.model_params["static_offset"] = optimizable_tensors["static_offset"]
-
-        # reset LR scheduler for xyz 
-        self.activate_xyz_learning(training_args)
-
     def activate_xyz_learning(self, training_args):
         # when this is called we are at iteration "training_args.reposition_until"
         def mock_reset_scheduler_lr_func(step):

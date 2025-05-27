@@ -211,15 +211,8 @@ def readWBCamerasFromXML(source_path, images_folder_name, cameras_xml_file_name,
         # for Camera obj we need R and T of the w2c matrix
         w2c = np.linalg.inv(c2w)
         R = np.transpose(w2c[:3, :3])   # R is stored transposed due to 'glm' in CUDA code
-        # print("WOW")
-        # print(w2c[:3, 3])
-        # print(centroid.numpy())
-        # print((w2c[:3, 3] - centroid.numpy()))
-        # print((w2c[:3, 3] - centroid.numpy()) * rescale_factor)
         
         T = w2c[:3, 3]
-
-        # bg = np.array([1, 1, 1]) if white_background else np.array([0, 0, 0])
 
         # create a camera for each timestep
         camera_images_folder_path = os.path.join(source_path, images_folder_name, str(cam_id))

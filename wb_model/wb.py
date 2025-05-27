@@ -16,8 +16,8 @@ WB_BLENDSHAPES_PATH        = ROOT + "/bs" #"wb_model/assets/bs"
 WB_TEXTURE_PATH = "wb_model/assets/skin_basecolor.png"
 
 # needed for adjustment of pos and scale to those of FLAME
-TARGET_HEIGHT = 0.34316921 # determined from flame base model height, used to rescale wb mesh
-WB_MESH_FOR_CENTERING_PATH = ROOT + "/smooth2/4_head.obj"
+TARGET_HEIGHT = 0.3 # determined from flame base model height, used to rescale wb mesh
+WB_MESH_FOR_CENTERING_PATH = ROOT + "/smooth2/0_head_nicolas_neutral" # "/smooth2/4_head.obj"
 
 
 
@@ -132,12 +132,7 @@ class WBModel(nn.Module):
         head_neutral_centered_v = (self.head_neutral_v - neutral_head_mean).unsqueeze(0)
         eyes_neutral_centered_v = (self.eyes_neutral_v - neutral_head_mean).unsqueeze(0)
 
-        #apply static offset beofre bs
-        # print("head neutral shape", head_neutral_centered_v.shape)
-        # print("eyes neutral shape", eyes_neutral_centered_v.shape)
-        # print("staticoffset shape", static_offset.shape)
-        # print("static_offset[:head_neutral_centered_v.shape[1]]", static_offset[:,:head_neutral_centered_v.shape[1]].shape)
-        # print("static_offset[head_neutral_centered_v.shape[1]:]", static_offset[:,head_neutral_centered_v.shape[1]:].shape)
+        #apply static offset before bs
         head_neutral_centered_v = head_neutral_centered_v + static_offset[:,:head_neutral_centered_v.shape[1]]
         eyes_neutral_centered_v = eyes_neutral_centered_v + static_offset[:,head_neutral_centered_v.shape[1]:]
 
