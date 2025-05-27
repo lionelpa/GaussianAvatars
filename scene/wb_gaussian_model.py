@@ -252,10 +252,6 @@ class WBGaussianModel(GaussianModel):
 
         optimizable_tensors = self.replace_tensor_to_optimizer(self._features_rest_original.clone(), "f_rest")
         self._features_rest = optimizable_tensors["f_rest"]
-
-        # reset bs_weights
-        optimizable_tensors = self.replace_tensor_to_optimizer(self._add_bs_weights_original.clone(), "add_bs_weights")
-        self.model_params["add_bs_weights"] = optimizable_tensors["add_bs_weights"]
     
     def reset_all(self, training_args):
         num_pts = self.binding.shape[0]

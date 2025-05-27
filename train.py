@@ -566,12 +566,12 @@ if __name__ == "__main__":
         args.render_meshes_iterations.extend(list(range(args.interval, args.iterations+1, args.interval)))
 
     # args.test_iterations          = [50000, 100000, 150000, 200000, 300000, 400000, 500000, 600000]# + args.test_iterations
-    args.test_iterations          = [50000, 100000, 150000, 200000, 300000, 400000, 500000, 600000]# + args.test_iterations
+    args.test_iterations          = [100000, 150000, 179999, 180000]# + args.test_iterations
     # used to track psnr 
-    args.test_render_iterations   = [50000, 100000, 150000, 200000, 300000, 400000, 500000, 600000]# + args.test_iterations
-    args.save_iterations          = [50000, 100000, 150000 ,200000, 300000, 400000, 500000, 600000] #+ args.save_iterations
-    args.checkpoint_iterations    = [50000, 100000, 150000 ,200000, 300000, 400000, 500000, 600000]
-    args.render_meshes_iterations = [1, 5000, 10000, 15000, 30000, 60000, 120000, 179999] #+ args.render_meshes_iterations
+    args.test_render_iterations   = [100000, 150000, 179999, 180000]# + args.test_iterations
+    args.save_iterations          = [100000, 150000, 179999 ,180000] #+ args.save_iterations
+    args.checkpoint_iterations    = [100000, 150000, 179999 ,180000]
+    args.render_meshes_iterations = [] #+ args.render_meshes_iterations
 
 
     print("Optimizing " + args.model_path)
